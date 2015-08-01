@@ -55,7 +55,6 @@ module Data.ByteString.Streaming.Char8 (
   pack,
   empty,
   unfoldr,
-  yield,
   map,
   maps,
   span,
@@ -119,23 +118,23 @@ import qualified Data.ByteString.Unsafe as S
 import qualified Data.ByteString.Char8 as Char8
 
 
-import Data.ByteString.Streaming.Internal.Type hiding 
-    (uncons, concat, append, materialize, dematerialize)
+import Data.ByteString.Streaming.Internal.Type hiding
+    (uncons, concat, append, materialize, dematerialize, yield)
 import qualified Data.ByteString.Streaming.Internal.Type as Type
 import qualified Data.ByteString.Streaming as BS
-import Data.ByteString.Streaming 
-    (ByteString (..), concats, chunk, yield, distributed,  
+import Data.ByteString.Streaming
+    (ByteString (..), concats, chunk, distributed,
     fromHandle, fromChunks, toChunks, fromStrict, toStrict,
-    empty, null, append, concat, cycle,
-    take, drop, splitAt, intercalate, group, 
+    empty, null, append, concat, cycle, yield,
+    take, drop, splitAt, intercalate, group,
     appendFile, stdout, stdin, toHandle,
-    hGetContents, hGetContentsN, hGet, hGetN, hPut, getContents, hGetNonBlocking, 
-    hGetNonBlockingN, readFile, writeFile, 
+    hGetContents, hGetContentsN, hGet, hGetN, hPut, getContents, hGetNonBlocking,
+    hGetNonBlockingN, readFile, writeFile,
     hPutNonBlocking, interact, zipWithList)
-import Data.Monoid         
+import Data.Monoid
 
 import Control.Monad            (mplus,liftM, join, ap)
-import Control.Monad.Trans      
+import Control.Monad.Trans
 import Control.Monad.Morph
 
 import Data.Word                (Word8)
@@ -236,8 +235,8 @@ uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))
 uncons (Empty r) = return (Left r)
 uncons (Chunk c cs)
     = return $ Right (w2c (S.unsafeHead c)
-                     , if S.length c == 1 
-                         then cs 
+                     , if S.length c == 1
+                         then cs
                          else Chunk (S.unsafeTail c) cs )
 uncons (Go m) = m >>= uncons
 {-# INLINE uncons #-}
@@ -335,7 +334,7 @@ repeat = BS.repeat . c2w
 -- recursive call.
 unfoldr :: (a -> Maybe (Char, a)) -> a -> ByteString m ()
 unfoldr f = BS.unfoldr go where
-  go a = case f a of 
+  go a = case f a of
     Nothing -> Nothing
     Just (c,a) -> Just (c2w c, a)
 
@@ -415,14 +414,12 @@ filter p = BS.filter (p . w2c)
 {-# INLINE filter #-}
 
 
-
-
-unlines :: Monad m =>  List (ByteString m) m r ->  ByteString m r 
+unlines :: Monad m =>  List (ByteString m) m r ->  ByteString m r
 unlines  =  loop where
-  loop ls = case ls of 
+  loop ls = case ls of
     Return r  -> Chunk (S.pack [10]) (Empty r)
     Wrap m    -> Go (liftM (loop ) m)
-    Step bsls ->  bsls >>= Chunk (S.pack [10]) . loop 
+    Step bsls ->  bsls >>= Chunk (S.pack [10]) . loop
 {-#INLINE unlines #-}
 
 lines :: Monad m => ByteString m r -> List (ByteString m) m r

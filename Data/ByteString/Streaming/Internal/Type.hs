@@ -2,7 +2,7 @@
 {-#LANGUAGE RankNTypes #-}
 {-#LANGUAGE GADTs #-}
 {-#LANGUAGE LambdaCase #-}
-{-#LANGUAGE OverloadedLists #-}  
+{-#LANGUAGE OverloadedLists #-}
 {-#LANGUAGE FlexibleContexts#-}
 module Data.ByteString.Streaming.Internal.Type where
 
@@ -14,8 +14,8 @@ import qualified Control.Foldl as L
 
 data List f m r = Return r | Step !(f (List f m r)) | Wrap (m (List f m r))
 
-instance (Functor f, Monad m) => Functor (List f m) where 
-  fmap f = \case 
+instance (Functor f, Monad m) => Functor (List f m) where
+  fmap f = \case
     Return r -> Return (f r)
     Step fls -> Step (fmap (fmap f) fls)
     Wrap mls -> Wrap (liftM (fmap f) mls)
@@ -24,7 +24,7 @@ instance (Functor f, Monad m) =>  Monad (List f m) where
   return = Return
   a >>= f = case a of
     Return r    -> f r
-    Step fls -> Step (fmap (>>= f) fls)  
+    Step fls -> Step (fmap (>>= f) fls)
     Wrap mls -> Wrap (liftM (>>= f) mls)
 
 instance (Functor f, Monad m) => Applicative (List f m) where
@@ -57,12 +57,12 @@ blank = Return ()
 {-#INLINE blank #-}
 
 -- build, fold
-construct :: (forall x . (r -> x) -> (f x -> x) -> (m x -> x) ->  x) 
+construct :: (forall x . (r -> x) -> (f x -> x) -> (m x -> x) ->  x)
           -> List f m r
-construct psi = psi Return Step Wrap 
+construct psi = psi Return Step Wrap
 
-destroy :: (Functor f, Monad m) 
-        => List f m r 
+destroy :: (Functor f, Monad m)
+        => List f m r
         -> (forall x . (r -> x) -> (f x -> x) -> (m x -> x) ->  x)
 destroy = \lst nil cons wrap ->
   let loop = \case Step fls -> cons (fmap loop fls)
@@ -70,13 +70,13 @@ destroy = \lst nil cons wrap ->
                    Return r -> nil r
   in  loop lst
 
-unfold 
-  :: (Functor f, Monad m) 
-  => (s -> m (Either r (f s))) 
-  -> s 
+unfold
+  :: (Functor f, Monad m)
+  => (s -> m (Either r (f s)))
+  -> s
   -> List f m r
 unfold coalg begin = loop begin where
-  loop s = Wrap $ do 
+  loop s = Wrap $ do
     e <- coalg s
     case e of
       Left r  -> return $ Return r
@@ -84,11 +84,11 @@ unfold coalg begin = loop begin where
 
 unfoldM :: (Functor f, Monad m)
       => (a -> m (Either r (f a))) -> a -> List f m r
-unfoldM f = let loop = Wrap . liftM (either Return (Step . fmap loop)) . f 
+unfoldM f = let loop = Wrap . liftM (either Return (Step . fmap loop)) . f
             in loop
 
 uncons ::  (Functor f, Monad m) => List f m r -> m (Either r (f (List f m r )))
-uncons p = case p of 
+uncons p = case p of
   Return r -> return (Left r)
   Step fls -> return (Right fls)
   Wrap mls -> mls >>= uncons
@@ -113,16 +113,16 @@ splitsAt = loop where
   loop n (Step fls) = Step (fmap (loop (n-1)) fls)
 
 distribute
-  :: (Functor f, Monad m, MonadTrans t, MFunctor t, 
-      Monad (t m), Monad (t (List f m))) 
-  => List f (t m) a 
+  :: (Functor f, Monad m, MonadTrans t, MFunctor t,
+      Monad (t m), Monad (t (List f m)))
+  => List f (t m) a
   -> t (List f m) a
-distribute ls = destroy ls 
-                   return 
+distribute ls = destroy ls
+                   return
                    (join . lift . Step . fmap Return )
                    (join . hoist (Wrap . fmap Return))
 
-listZipWith 
+listZipWith
   :: (Monad m, Functor g)
   =>  (forall x . a -> f x -> g x)
   -> [a]
@@ -131,8 +131,35 @@ listZipWith
 listZipWith op zs = loop zs
   where
     loop [] ls      = loop zs ls
-    loop (x:xs)  ls = case ls of 
+    loop (x:xs)  ls = case ls of
       Return r -> Return r
       Step fls -> Step $ fmap (loop xs) (op x fls)
       Wrap mls -> Wrap $ liftM (loop (x:xs)) mls
+  
+data Of a b = Of !a b deriving (Show, Eq, Ord, Read)
+instance Functor (Of a) where fmap f (Of a b) = Of a (f b)
+
+type Producer a m r = List (Of a) m r
+
+yield a = Step (Of a (Return ()))
+
+for :: (Monad m, Functor f) => List (Of a) m r -> (a -> List f m x) -> List f m r
+for ls act = loop ls where
+  loop ls0 = case ls0 of 
+    Return r       -> Return r
+    Step (Of a ls) -> act a >> loop ls
+    Wrap mls       -> Wrap (fmap loop mls)
+
+
+forM_ :: Monad m => List (Of a) m r -> (a -> m x) -> m r
+forM_ ls act = loop ls where
+  loop ls0 = case ls0 of
+    Return r       -> return r
+    Step (Of a ls) -> act a >> loop ls
+    Wrap mls       -> mls >>= loop
+
+
+
+
+
     

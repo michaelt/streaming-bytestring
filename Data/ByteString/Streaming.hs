@@ -56,7 +56,6 @@ module Data.ByteString.Streaming (
   pack,
   empty,
   unfoldr,
-  yield,
   map,
   maps,
   span,
@@ -66,9 +65,7 @@ module Data.ByteString.Streaming (
   take,
   drop,
   takeWhile,
-  toChunks,
   break,
-  fromChunks,
   append,
   concat,
   concats,
@@ -89,6 +86,7 @@ module Data.ByteString.Streaming (
   writeFile,
   appendFile,
   uncons,
+  nextChunk,
   head,
   intercalate,
   intersperse,
@@ -96,11 +94,16 @@ module Data.ByteString.Streaming (
   null,
   zipWithList,
   chunk,
+  yield,
   distributed,
   fromStrict,
   toStrict,
+  fromLazy,
+  toLazy,
+  toChunks,
+  fromChunks,
   hPutNonBlocking,
-  interact  
+  interact
   ) where
 
 import Prelude hiding
@@ -119,13 +122,13 @@ import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
-import Data.ByteString.Streaming.Internal.Type hiding (uncons, concat, append, materialize, dematerialize)
+import Data.ByteString.Streaming.Internal.Type hiding (yield, uncons, concat, append, materialize, dematerialize)
 import qualified Data.ByteString.Streaming.Internal.Type as Type
 
-import Data.Monoid         
+import Data.Monoid
 
 import Control.Monad            (mplus,liftM, join, ap)
-import Control.Monad.Trans      
+import Control.Monad.Trans
 import Control.Monad.Morph
 
 import Data.Word                (Word8)
@@ -143,7 +146,7 @@ import Foreign.Storable
 import GHC.Exts ( SpecConstrAnnotation(..) )
 
 
-data ByteString m a = 
+data ByteString m a =
   Empty a
   | Chunk {-#UNPACK #-} !S.ByteString (ByteString m a )
   | Go (m (ByteString m a ))
@@ -166,7 +169,7 @@ instance Monad m => Monad (ByteString m) where
       Empty _ -> y
       Chunk a b -> Chunk a (loop SPEC b)
       Go m -> Go (liftM (loop SPEC) m)
-  x >>= f = 
+  x >>= f =
     -- case x of
     --   Empty a -> f a
     --   Chunk bs bss -> Chunk bs (bss >>= f)
@@ -183,7 +186,7 @@ instance MonadIO m => MonadIO (ByteString m) where
 
 instance MonadTrans ByteString where
   lift ma = Go $ liftM Empty ma
-  
+
 data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r
 
 data SPEC = SPEC | SPEC2
@@ -196,10 +199,9 @@ chunk c@(S.PS _ _ len) cs | len == 0  = cs
                           | otherwise = Chunk c cs
 {-# INLINE chunk #-}
 
-yield :: S.ByteString -> ByteString m () 
-yield c@(S.PS _ _ len) | len == 0  = Empty ()
-                       | otherwise = Chunk c (Empty ())
-{-#INLINE yield #-}
+yield :: S.ByteString -> ByteString m ()
+yield bs = chunk bs (Empty ())
+{-# INLINE yield #-}
 
 
 -- | Steptruct a byte stream from its Church encoding (compare @GHC.Exts.build@)
@@ -209,8 +211,8 @@ materialize phi = phi Empty Chunk Go
 {-#INLINE materialize #-}
 
 -- | Resolve a byte stream into its Church encoding (compare @Data.List.foldr@)
-dematerialize :: Monad m 
-              => ByteString m r 
+dematerialize :: Monad m
+              => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
 dematerialize x nil cons wrap = loop SPEC x
   where
@@ -224,11 +226,11 @@ concats :: Monad m => List (ByteString m) m r -> ByteString m r
 concats x = destroy x Empty join Go
 
 distributed
-  :: (Monad m, MonadTrans t, MFunctor t, Monad (t m), Monad (t (ByteString m))) 
-  => ByteString (t m) a 
+  :: (Monad m, MonadTrans t, MFunctor t, Monad (t m), Monad (t (ByteString m)))
+  => ByteString (t m) a
   -> t (ByteString m) a
-distributed ls = dematerialize ls 
-             return 
+distributed ls = dematerialize ls
+             return
              (\bs x -> join $ lift $ Chunk bs (Empty x) )
              (join . hoist (Go . fmap Empty))
 
@@ -287,7 +289,7 @@ unpackAppendBytesStrict (S.PS fp off len) xs =
                            loop sentinal (p `plusPtr` (-1)) (Step (Word8_ x acc))
 
 unpackBytes :: Monad m => ByteString m r ->  List Word8_ m r
-unpackBytes bss = dematerialize bss 
+unpackBytes bss = dematerialize bss
   Return
   unpackAppendBytesLazy
   Wrap
@@ -325,12 +327,12 @@ fromChunks cs = L.foldr chunk (Empty ()) cs
 
 -- -- | /O(c)/ Convert a lazy 'ByteString' into a list of strict 'ByteString'
 toChunks :: Monad m => ByteString m () -> m [P.ByteString]
-toChunks bs = 
-  dematerialize bs 
+toChunks bs =
+  dematerialize bs
       (\() -> return [])
       (\b mx -> liftM (b:) mx)
       join
-  -- type ByteString_ m r = 
+  -- type ByteString_ m r =
     -- (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
 
   -- foldrChunks (\a bs -> liftM (a :) bs) (return [])
@@ -347,12 +349,12 @@ fromStrict bs | S.null bs = Empty ()
 -- avoid converting back and forth between strict and lazy bytestrings.
 
 toStrict :: Monad m => ByteString m () -> m (S.ByteString)
-toStrict bs = dematerialize bs 
+toStrict bs = dematerialize bs
   (\r -> return S.empty)
   (\bs mbs -> liftM (S.append bs) mbs)
   join
-  
-toStrict' cs0 = 
+
+toStrict' cs0 =
   do bss <- toChunks cs0
      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
      return $ S.unsafeCreate totalLen $ \ptr -> go bss ptr
@@ -364,7 +366,7 @@ toStrict' cs0 =
         go cs (destptr `plusPtr` len)
 
 toStrict'' :: MonadIO m => ByteString m () -> m (S.ByteString)
-toStrict'' cs0 = 
+toStrict'' cs0 =
   do bss <- toChunks cs0
      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
      liftIO $ S.create totalLen $ \ptr -> go bss ptr
@@ -374,15 +376,15 @@ toStrict'' cs0 =
       withForeignPtr fp $ \p -> do
         S.memcpy destptr (p `plusPtr` off) len
         go cs (destptr `plusPtr` len)
-        
-toLazy :: Monad m => ByteString m () -> m BI.ByteString    
-toLazy bs = dematerialize bs 
+
+toLazy :: Monad m => ByteString m () -> m BI.ByteString
+toLazy bs = dematerialize bs
                 (\() -> return (BI.Empty))
                 (\b mx -> liftM (BI.Chunk b) mx)
                 join
-                                   
+                      
 fromLazy :: Monad m => BI.ByteString -> ByteString m ()
-fromLazy = BI.foldrChunks Chunk (Empty ()) 
+fromLazy = BI.foldrChunks Chunk (Empty ())
 
 
 
@@ -482,11 +484,18 @@ uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
 uncons (Empty r) = return (Left r)
 uncons (Chunk c cs)
     = return $ Right (S.unsafeHead c
-                     , if S.length c == 1 
-                         then cs 
+                     , if S.length c == 1
+                         then cs
                          else Chunk (S.unsafeTail c) cs )
 uncons (Go m) = m >>= uncons
 {-# INLINE uncons #-}
+
+nextChunk :: Monad m => ByteString m r -> m (Either r (S.ByteString, ByteString m r))
+nextChunk (Empty r) = return (Left r)
+nextChunk (Chunk c cs) = if S.null c then nextChunk cs else return $ Right (c,cs)
+nextChunk (Go m) = m >>= nextChunk
+{-# INLINE nextChunk #-}
+
 
 --
 --
@@ -498,7 +507,7 @@ uncons (Go m) = m >>= uncons
 --   where
 --     search !n !s = case s of
 --      Empty r -> Empty (Empty r)
-   --   Chunk c 
+   --   Chunk c
         -- | null s             = (src,empty)      -- not found
         -- | pat `isPrefixOf` s = (take n src,s)
         -- | otherwise          = search (n+1) (unsafeTail s)
@@ -536,7 +545,7 @@ uncons (Go m) = m >>= uncons
 -- unsnoc Empty        = Nothing
 -- unsnoc (Chunk c cs) = Just (init (Chunk c cs), last (Chunk c cs))
 
--- | /O(n\/c)/ Append two 
+-- | /O(n\/c)/ Append two
 append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s
 append xs ys = dematerialize xs (const ys) Chunk Go
 {-# INLINE append #-}
@@ -608,12 +617,12 @@ fold step begin done p0 = loop p0 begin
 --   foldr (\(v::a) (fn::b->b) -> oneShot (\(z::b) -> z `seq` fn (k z v))) (id :: b -> b) xs z0
 --   -- See Note [Left folds via right fold]
 fold'x :: Monad m => ByteString m r -> (x -> Word8 -> x) -> x -> (x -> b) -> m (b,r)
-fold'x p0 = 
-  dematerialize p0 
-  (\r step begin done -> return (done begin, r)) 
+fold'x p0 =
+  dematerialize p0
+  (\r step begin done -> return (done begin, r))
   (\bs ff step begin done -> ff step (S.foldl' step begin bs) done)
-  (\mf step begin done -> mf >>= \f -> f step begin done) 
-  
+  (\mf step begin done -> mf >>= \f -> f step begin done)
+
 fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b,r)
 fold' step begin done p0 = loop p0 begin
   where
@@ -882,7 +891,7 @@ splitAt i cs0 = splitAt' i cs0
         splitAt' _ (Empty r  )   = Empty (Empty r)
         splitAt' n (Chunk c cs) =
           if n < fromIntegral (S.length c)
-            then Chunk (S.take (fromIntegral n) c) $ 
+            then Chunk (S.take (fromIntegral n) c) $
                      Empty (Chunk (S.drop (fromIntegral n) c) cs)
             else Chunk c (splitAt' (n - fromIntegral (S.length c)) cs)
         splitAt' n (Go m) = Go  (liftM (splitAt' n) m)
@@ -915,7 +924,7 @@ break f cs0 = break' cs0
         break' (Chunk c cs) =
           case findIndexOrEnd f c of
             0                  -> Empty (Chunk c cs)
-            n | n < S.length c -> Chunk (S.take n c) $ 
+            n | n < S.length c -> Chunk (S.take n c) $
                                       Empty (Chunk (S.drop n c) cs)
               | otherwise      -> Chunk c (break' cs)
         break' (Go m) = Go (liftM break' m)
@@ -1002,9 +1011,9 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
 -- are slices of the original.
 --
 split :: Monad m => Word8 -> ByteString m r -> List (ByteString m) m r
-split w = loop SPEC 
+split w = loop SPEC
   where
-  loop !_ x = case x of 
+  loop !_ x = case x of
     Empty r      ->  Return r
     Go m         -> Wrap $ liftM (loop SPEC) m
     Chunk c0 cs0 -> comb SPEC [] (S.split w c0) cs0
@@ -1068,12 +1077,12 @@ intercalate s (Wrap m) = Go $ liftM (intercalate s) m
 intercalate s (Step bsls) = do  -- this isn't quite right yet
   ls <- bsls
   s >> loop ls
- where 
+ where
   loop (Return r) =  Empty r -- concat . (L.intersperse s)
   loop (Wrap m) = Go $ liftM loop m
-  loop (Step bsls) = do   
+  loop (Step bsls) = do
     ls <- bsls
-    case ls of 
+    case ls of
       Return r -> Empty r  -- no '\n' before end, in this case.
       x -> s >> loop x
 
@@ -1359,10 +1368,10 @@ hGetContentsN k h = loop -- TODO close on exceptions
     loop = do
         c <- liftIO (S.hGetSome h k )-- only blocks if there is no data available
         if S.null c
-          then Go $ do 
+          then Go $ do
              hClose h
              return (Empty ())
-          else Chunk c loop 
+          else Chunk c loop
 
 -- | Read @n@ bytes into a 'ByteString', directly from the
 -- specified 'Handle', in chunks of size @k@.
@@ -1443,21 +1452,21 @@ hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 -- The Handle will be held open until EOF is encountered.
 --
 readFile :: FilePath -> ByteString IO ()
-readFile f = Go $ liftM hGetContents (openBinaryFile f ReadMode) 
+readFile f = Go $ liftM hGetContents (openBinaryFile f ReadMode)
 {-#INLINE readFile #-}
 -- | Write a 'ByteString' to a file.
 --
 writeFile :: FilePath -> ByteString IO r -> IO r
-writeFile f txt = bracket 
-    (openBinaryFile f WriteMode) 
+writeFile f txt = bracket
+    (openBinaryFile f WriteMode)
     hClose
     (\hdl -> hPut hdl txt)
 
 -- | Append a 'ByteString' to a file.
 --
 appendFile :: FilePath -> ByteString IO r -> IO r
-appendFile f txt = bracket 
-    (openBinaryFile f AppendMode) 
+appendFile f txt = bracket
+    (openBinaryFile f AppendMode)
     hClose
     (\hdl -> hPut hdl txt)
 
@@ -1539,7 +1548,7 @@ interact transformer = stdout (transformer stdin)
 
 revNonEmptyChunks :: [P.ByteString] -> ByteString m r -> ByteString m r
 revNonEmptyChunks xs p = loop p xs
-  where 
+  where
     loop !bss [] = bss
     loop bss (b:bs) = loop (Chunk b bss) bs
 -- L.foldl' (flip Chunk) Empty cs
@@ -1574,7 +1583,7 @@ zipWithList
 zipWithList op zs = loop zs
   where
     loop [] !ls      = loop zs ls
-    loop a@(x:xs)  ls = case ls of 
+    loop a@(x:xs)  ls = case ls of
       Return r -> Return r
       Step fls -> Step $ fmap (loop xs) (op x fls)
       Wrap mls -> Wrap $ liftM (loop a) mls

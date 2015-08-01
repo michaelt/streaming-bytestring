@@ -27,16 +27,12 @@
 
 module Data.ByteString.Streaming.Attoparsec
     (
-      Result(..)
+      parse
+      , parsed
       , atto
       , atto_
     , module Data.Attoparsec.ByteString
-    -- * Running parsers
-    , parse
-    , parseTest
-    -- ** Result conversion
-    , maybeResult
-    , eitherResult
+
     )
     where
 
@@ -46,96 +42,72 @@ import qualified Data.List as L (intercalate)
 import qualified Data.ByteString as B
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Except
+import Control.Monad.Trans
+
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.Attoparsec.Internal.Types as T
 import Data.Attoparsec.ByteString
     hiding (IResult(..), Result, eitherResult, maybeResult,
             parse, parseWith, parseTest)
-import Data.ByteString.Streaming.Internal.Type
+import Data.ByteString.Streaming.Internal.Type hiding (yield)
+import qualified Data.ByteString.Streaming.Internal.Type as Type
 import Data.ByteString.Streaming
+
+
 -- | The result of a parse.
 
+parse :: Monad m 
+      => A.Parser a 
+      -> ByteString m x 
+      -> m (Either a ([String], String), ByteString m x)
+parse p s  = case s of
+    Chunk x xs -> go (A.parse p x) xs
+    Empty r    -> go (A.parse p B.empty) (Empty r)
+    Go m       -> m >>= parse p
+  where
+  go (T.Fail x stk msg) ys      = return $ (Right (stk, msg), Chunk x ys)
+  go (T.Done x r) ys            = return $ (Left r, Chunk x ys)
+  go (T.Partial k) (Chunk y ys) = go (k y) ys
+  go (T.Partial k) (Go m)       = m >>= go (T.Partial k)
+  go (T.Partial k) empty        = go (k B.empty) empty
 
 
 -- | Run a parser and return its result.
 atto :: Monad m => A.Parser a -> StateT (ByteString m x) m (Either a ([String], String))
-atto p = StateT loop where
-  loop s  = case s of
-              Chunk x xs -> go (A.parse p x) xs
-              Empty r    -> go (A.parse p B.empty) (Empty r)
-              Go m       -> m >>= loop 
-
-  go (T.Fail x stk msg) ys      = return $ (Right (stk, msg), Chunk x ys) 
-  go (T.Done x r) ys            = return $ (Left r, Chunk x ys) 
-  go (T.Partial k) (Chunk y ys) = go (k y) ys
-  go (T.Partial k) (Go m)       = m >>= go (T.Partial k) 
-  go (T.Partial k) empty        = go (k B.empty) empty
-
+atto p = StateT (parse p)
 
 atto_ :: Monad m => A.Parser a -> ExceptT ([String], String) (StateT (ByteString m x) m) a
 atto_ p = ExceptT $ StateT loop where
   loop s  = case s of
       Chunk x xs -> go (A.parse p x) xs
       Empty r    -> go (A.parse p B.empty) (Empty r)
-      Go m       -> m >>= loop 
+      Go m       -> m >>= loop
 
-  go (T.Fail x stk msg) ys      = return $ (Left (stk, msg), Chunk x ys) 
-  go (T.Done x r) ys            = return $ (Right r, Chunk x ys) 
+  go (T.Fail x stk msg) ys      = return $ (Left (stk, msg), Chunk x ys)
+  go (T.Done x r) ys            = return $ (Right r, Chunk x ys)
   go (T.Partial k) (Chunk y ys) = go (k y) ys
-  go (T.Partial k) (Go m)       = m >>= go (T.Partial k) 
+  go (T.Partial k) (Go m)       = m >>= go (T.Partial k)
   go (T.Partial k) empty        = go (k B.empty) empty
 
-data Result x m r = Fail (ByteString m x) [String] String
-              -- ^ The parse failed.  The 'ByteString' is the input
-              -- that had not yet been consumed when the failure
-              -- occurred.  The @[@'String'@]@ is a list of contexts
-              -- in which the error occurred.  The 'String' is the
-              -- message describing the error, if any.
-              | Done (ByteString m x) r
-              -- ^ The parse succeeded.  The 'ByteString' is the
-              -- input that had not yet been consumed (if any) when
-              -- the parse succeeded.
-              
-instance Show r => Show (Result a m r) where
-    show (Fail (Chunk bs p) stk msg) =
-        "Fail  " ++ show bs ++ ", etc.:  " ++ show stk ++ " " ++ show msg
-    show (Fail (Empty r) stk msg) =  
-        "Fail, byte stream ended:  " ++ show stk ++ " " ++ show msg
-    show (Fail (Go m) stk msg) =
-        "Fail, bytestring in progress: " ++ show stk ++ " " ++ show msg
-    show (Done bs r)       = "Done  " ++ show r
 
-fmapR :: (a -> b) -> Result x m a -> Result x m b
-fmapR _ (Fail st stk msg) = Fail st stk msg
-fmapR f (Done bs r)       = Done bs (f r)
-
-instance Functor (Result a m) where fmap = fmapR
-
--- | Run a parser and return its result.
-parse :: Monad m => A.Parser a -> ByteString m x -> m (Result x m a)
-parse p s = case s of
-              Chunk x xs -> go (A.parse p x) xs
-              Empty r    -> go (A.parse p B.empty) (Empty r)
-              Go m       -> m >>= parse p
+parsed
+  :: Monad m
+  => A.Parser a  -- ^ Attoparsec parser
+  -> ByteString m r         -- ^ Raw input
+  -> List (Of a) m (Either (([String],String), ByteString m r) r)
+parsed parser = go
   where
-    go (T.Fail x stk msg) ys      = return $ Fail (Chunk x ys) stk msg
-    go (T.Done x r) ys            = return $ Done (Chunk x ys) r
-    go (T.Partial k) (Chunk y ys) = go (k y) ys
-    go (T.Partial k) (Go m)       = m >>= go (T.Partial k) 
-    go (T.Partial k) empty        = go (k B.empty) empty
-
-
--- | Run a parser and print its result to standard output.
-parseTest :: (Show a) => A.Parser a -> ByteString IO r -> IO ()
-parseTest p s = parse p s >>= print
-
--- | Convert a 'Result' value to a 'Maybe' value.
-maybeResult :: Result a m r -> Maybe r
-maybeResult (Done _ r) = Just r
-maybeResult _          = Nothing
-
--- | Convert a 'Result' value to an 'Either' value.
-eitherResult :: Result a m r -> Either String r
-eitherResult (Done _ r)        = Right r
-eitherResult (Fail _ [] msg)   = Left msg
-eitherResult (Fail _ ctxs msg) = Left (L.intercalate " > " ctxs ++ ": " ++ msg)
+    go p0 = do
+      x <- lift (nextChunk p0)
+      case x of
+        Left r       -> return (Right r)
+        Right (bs,p1) -> step (yield bs >>) (A.parse parser bs) p1
+    step diffP res p0 = case res of
+      A.Fail _ c m -> return (Left ((c,m), diffP p0))
+      A.Done bs b   -> Type.yield b >> go (yield bs >> p0)
+      A.Partial k  -> do
+        x <- lift (nextChunk p0)
+        case x of
+          Left e -> step diffP (k mempty) (return e)
+          Right (a,p1) -> step (diffP . (yield a >>)) (k a) p1
+{-# INLINABLE parsed #-}

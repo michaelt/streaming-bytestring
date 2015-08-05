@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP, BangPatterns #-}
-{-#LANGUAGE RankNTypes #-}
+{-#LANGUAGE RankNTypes, OverloadedStrings #-}
 -- This library emulates Data.ByteString.Lazy but includes a little 'FreeT' library
 
 -- |
@@ -56,7 +56,7 @@ module Data.ByteString.Streaming.Char8 (
   empty,
   unfoldr,
   map,
-  maps,
+--  maps,
   span,
   split,
   splitAt,
@@ -96,7 +96,7 @@ module Data.ByteString.Streaming.Char8 (
   unlines,
 
   string,
-  zipWithList
+  zipWithStream
   ) where
 
 import Prelude hiding
@@ -106,7 +106,7 @@ import Prelude hiding
     ,repeat, cycle, interact, iterate,readFile,writeFile,appendFile,replicate
     ,getContents,getLine,putStr,putStrLn ,zip,zipWith,unzip,notElem)
 import qualified Prelude
-import qualified Data.List              as L  -- L for list/lazy
+import qualified Data.List             as L  -- L for list/lazy
 import qualified Data.ByteString.Lazy.Internal as BI  -- just for fromChunks etc
 
 
@@ -118,11 +118,13 @@ import qualified Data.ByteString.Unsafe as S
 import qualified Data.ByteString.Char8 as Char8
 
 
-import Data.ByteString.Streaming.Internal.Type hiding
-    (uncons, concat, append, materialize, dematerialize, yield)
-import qualified Data.ByteString.Streaming.Internal.Type as Type
+import Stream.Types hiding (yield, uncons, concat, append)
+import qualified Stream.Types as Type
+import qualified Stream.Folding.Prelude as F
+
 import qualified Data.ByteString.Streaming as BS
 import Data.ByteString.Streaming
+
     (ByteString (..), concats, chunk, distributed,
     fromHandle, fromChunks, toChunks, fromStrict, toStrict,
     empty, null, append, concat, cycle, yield,
@@ -130,7 +132,7 @@ import Data.ByteString.Streaming
     appendFile, stdout, stdin, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, getContents, hGetNonBlocking,
     hGetNonBlockingN, readFile, writeFile,
-    hPutNonBlocking, interact, zipWithList)
+    hPutNonBlocking, interact, zipWithStream)
 import Data.Monoid
 
 import Control.Monad            (mplus,liftM, join, ap)
@@ -156,14 +158,14 @@ data Char_ r = Char_ {-#UNPACK#-} !Char r
 data SPEC = SPEC | SPEC2
 {-# ANN type SPEC ForceSpecConstr #-}
 
-unpackAppendCharsLazy :: S.ByteString -> List Char_ m r -> List Char_ m r
+unpackAppendCharsLazy :: S.ByteString -> Stream Char_ m r -> Stream Char_ m r
 unpackAppendCharsLazy (S.PS fp off len) xs
  | len <= 100 = unpackAppendCharsStrict (S.PS fp off len) xs
  | otherwise  = unpackAppendCharsStrict (S.PS fp off 100) remainder
  where
    remainder  = unpackAppendCharsLazy (S.PS fp (off+100) (len-100)) xs
 
-unpackAppendCharsStrict :: S.ByteString -> List Char_ m r -> List Char_ m r
+unpackAppendCharsStrict :: S.ByteString -> Stream Char_ m r -> Stream Char_ m r
 unpackAppendCharsStrict (S.PS fp off len) xs =
   S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
        loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
@@ -175,10 +177,10 @@ unpackAppendCharsStrict (S.PS fp off len) xs =
 
 
 
-unpackChars ::  Monad m => ByteString m r ->  List Char_ m r
+unpackChars ::  Monad m => ByteString m r ->  Stream Char_ m r
 unpackChars (Empty r)    = Return r
 unpackChars (Chunk c cs) = unpackAppendCharsLazy c (unpackChars cs)
-unpackChars (Go m)       = Wrap (liftM unpackChars m)
+unpackChars (Go m)       = Delay (liftM unpackChars m)
 
 
 packChars :: Monad m => [Char] -> ByteString m ()
@@ -259,10 +261,10 @@ map f = BS.map (c2w . f . w2c)
 --
 -- -- | The 'intersperse' function takes a 'Word8' and a 'ByteString' and
 -- -- \`intersperses\' that byte between the elements of the 'ByteString'.
--- -- It is analogous to the intersperse function on Lists.
+-- -- It is analogous to the intersperse function on Streams.
 intersperse :: Monad m => Char -> ByteString m r -> ByteString m r
 intersperse c = BS.intersperse (c2w c)
-
+{-#INLINE intersperse #-}
 -- -- | The 'transpose' function transposes the rows and columns of its
 -- -- 'ByteString' argument.
 -- transpose :: [ByteString] -> [ByteString]
@@ -326,7 +328,7 @@ repeat = BS.repeat . c2w
 -- | 'cycle' ties a finite ByteString into a circular one, or equivalently,
 -- the infinite repetition of the original ByteString.
 --
--- | /O(n)/ The 'unfoldr' function is analogous to the List \'unfoldr\'.
+-- | /O(n)/ The 'unfoldr' function is analogous to the Stream \'unfoldr\'.
 -- 'unfoldr' builds a ByteString from a seed value.  The function takes
 -- the element and returns 'Nothing' if it is done producing the
 -- ByteString or returns 'Just' @(a,b)@, in which case, @a@ is a
@@ -372,7 +374,7 @@ span p = break (not . p)
 -- -- > splitWith (=='a') "aabbaca" == ["","","bb","c",""]
 -- -- > splitWith (=='a') []        == []
 -- --
-splitWith :: Monad m => (Char -> Bool) -> ByteString m r -> List (ByteString m) m r
+splitWith :: Monad m => (Char -> Bool) -> ByteString m r -> Stream (ByteString m) m r
 splitWith f = BS.splitWith (f . w2c)
 {-# INLINE splitWith #-}
 
@@ -392,7 +394,7 @@ splitWith f = BS.splitWith (f . w2c)
 -- not copy the substrings, it just constructs new 'ByteStrings' that
 -- are slices of the original.
 --
-split :: Monad m => Char -> ByteString m r -> List (ByteString m) m r
+split :: Monad m => Char -> ByteString m r -> Stream (ByteString m) m r
 split c = BS.split (c2w c)
 {-# INLINE split #-}
 -- -- ---------------------------------------------------------------------
@@ -413,19 +415,23 @@ filter :: (Char -> Bool) -> ByteString m r -> ByteString m r
 filter p = BS.filter (p . w2c)
 {-# INLINE filter #-}
 
-
-unlines :: Monad m =>  List (ByteString m) m r ->  ByteString m r
-unlines  =  loop where
-  loop ls = case ls of
-    Return r  -> Chunk (S.pack [10]) (Empty r)
-    Wrap m    -> Go (liftM (loop ) m)
-    Step bsls ->  bsls >>= Chunk (S.pack [10]) . loop
+unlines :: Monad m =>  Stream (ByteString m) m r ->  ByteString m r
+unlines str =  case str of
+  Return r -> Empty r
+  Step b   -> do 
+    st <- b 
+    let bs = unlines st
+    case bs of 
+      Chunk "" (Empty r)   -> Empty r
+      Chunk "\n" (Empty r) -> bs 
+      _                    -> cons' '\n' bs
+  Delay m  -> Go (liftM unlines m)
+                  
 {-#INLINE unlines #-}
 
-lines :: Monad m => ByteString m r -> List (ByteString m) m r
-lines = split '\n'
+lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
+lines = BS.split 10
 {-#INLINE lines #-}
-
 
 string :: String -> ByteString m ()
 string = yield . S.pack . Prelude.map S.c2w

@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP, BangPatterns #-}
-{-#LANGUAGE RankNTypes #-}
+{-#LANGUAGE RankNTypes, GADTs #-}
 -- This library emulates Data.ByteString.Lazy but includes a little 'FreeT' library
 
 -- |
@@ -57,7 +57,7 @@ module Data.ByteString.Streaming (
   empty,
   unfoldr,
   map,
-  maps,
+--  maps,
   span,
   split,
   splitAt,
@@ -92,7 +92,7 @@ module Data.ByteString.Streaming (
   intersperse,
   group,
   null,
-  zipWithList,
+  zipWithStream,
   chunk,
   yield,
   distributed,
@@ -103,7 +103,9 @@ module Data.ByteString.Streaming (
   toChunks,
   fromChunks,
   hPutNonBlocking,
-  interact
+  interact,
+  materialize,
+  dematerialize
   ) where
 
 import Prelude hiding
@@ -122,12 +124,12 @@ import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
-import Data.ByteString.Streaming.Internal.Type hiding (yield, uncons, concat, append, materialize, dematerialize)
-import qualified Data.ByteString.Streaming.Internal.Type as Type
+import Stream.Types hiding (yield, uncons, concat, append, materialize, dematerialize)
+import qualified Stream.Types as Type
 
 import Data.Monoid
 
-import Control.Monad            (mplus,liftM, join, ap)
+import Control.Monad            (mplus,liftM, join, ap, liftM2)
 import Control.Monad.Trans
 import Control.Monad.Morph
 
@@ -144,7 +146,8 @@ import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
 import GHC.Exts ( SpecConstrAnnotation(..) )
-
+import Data.String
+import Data.Functor.Identity
 
 data ByteString m a =
   Empty a
@@ -174,7 +177,7 @@ instance Monad m => Monad (ByteString m) where
     --   Empty a -> f a
     --   Chunk bs bss -> Chunk bs (bss >>= f)
     --   Go mbss      -> Go (liftM (>>= f) mbss)
-    loop SPEC x where -- the SPEC seems pointless in simple case
+    loop SPEC x where -- unlike >> this SPEC seems pointless 
       loop !_ y = case y of
         Empty a -> f a
         Chunk bs bss -> Chunk bs (loop SPEC bss)
@@ -187,6 +190,20 @@ instance MonadIO m => MonadIO (ByteString m) where
 instance MonadTrans ByteString where
   lift ma = Go $ liftM Empty ma
 
+
+instance (r ~ ()) => IsString (ByteString m r) where
+  fromString = yield . S.pack . Prelude.map S.c2w
+
+instance (m ~ Identity, Show r) => Show (ByteString m r) where
+  show bs = case bs of
+    Empty r -> "Empty (" ++ show r ++ ")"
+    Go (Identity bs') -> "Go (Identity (" ++ show bs' ++ "))"
+    Chunk bs'' bs -> "Chunk " ++ show bs'' ++ " (" ++ show bs ++ ")"
+    
+instance (Monoid r, Monad m) => Monoid (ByteString m r) where
+  mempty = Empty mempty
+  mappend = liftM2 mappend
+      
 data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r
 
 data SPEC = SPEC | SPEC2
@@ -204,13 +221,13 @@ yield bs = chunk bs (Empty ())
 {-# INLINE yield #-}
 
 
--- | Steptruct a byte stream from its Church encoding (compare @GHC.Exts.build@)
+-- | Construct a byte stream from its Church encoding (compare @GHC.Exts.build@)
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r
 materialize phi = phi Empty Chunk Go
 {-#INLINE materialize #-}
 
--- | Resolve a byte stream into its Church encoding (compare @Data.List.foldr@)
+-- | Resolve a byte stream into its Church encoding (compare @Data.Stream.foldr@)
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
@@ -222,13 +239,12 @@ dematerialize x nil cons wrap = loop SPEC x
      Go ms -> wrap (liftM (loop SPEC) ms)
 {-#INLINE dematerialize #-}
 
-concats :: Monad m => List (ByteString m) m r -> ByteString m r
-concats x = destroy x Empty join Go
+concats :: Monad m => Stream (ByteString m) m r -> ByteString m r
+concats x = destroy x join Go Empty 
 
 distributed
   :: (Monad m, MonadTrans t, MFunctor t, Monad (t m), Monad (t (ByteString m)))
-  => ByteString (t m) a
-  -> t (ByteString m) a
+  => ByteString (t m) a -> t (ByteString m) a
 distributed ls = dematerialize ls
              return
              (\bs x -> join $ lift $ Chunk bs (Empty x) )
@@ -271,14 +287,14 @@ packBytes cs0 =
       (bs, [])  -> Chunk bs (Empty ())
       (bs, cs') -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
 
-unpackAppendBytesLazy :: S.ByteString -> List Word8_ m r -> List Word8_ m r
+unpackAppendBytesLazy :: S.ByteString -> Stream Word8_ m r -> Stream Word8_ m r
 unpackAppendBytesLazy (S.PS fp off len) xs
   | len <= 100 = unpackAppendBytesStrict (S.PS fp off len) xs
   | otherwise  = unpackAppendBytesStrict (S.PS fp off 100) remainder
   where
     remainder  = unpackAppendBytesLazy (S.PS fp (off+100) (len-100)) xs
 
-unpackAppendBytesStrict :: S.ByteString -> List Word8_ m r -> List Word8_ m r
+unpackAppendBytesStrict :: S.ByteString -> Stream Word8_ m r -> Stream Word8_ m r
 unpackAppendBytesStrict (S.PS fp off len) xs =
  S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
       loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
@@ -288,15 +304,15 @@ unpackAppendBytesStrict (S.PS fp off len) xs =
       | otherwise     = do x <- peek p
                            loop sentinal (p `plusPtr` (-1)) (Step (Word8_ x acc))
 
-unpackBytes :: Monad m => ByteString m r ->  List Word8_ m r
+unpackBytes :: Monad m => ByteString m r ->  Stream Word8_ m r
 unpackBytes bss = dematerialize bss
   Return
   unpackAppendBytesLazy
-  Wrap
+  Delay
 
 -- unpackBytes (Empty r)   = Return r
 -- unpackBytes (Chunk c cs) = unpackAppendBytesLazy c (unpackBytes cs)
--- unpackBytes (Go m)       = Wrap (liftM unpackBytes m)
+-- unpackBytes (Go m)       = Delay (liftM unpackBytes m)
 
 
 -- -----------------------------------------------------------------------------
@@ -394,7 +410,6 @@ foldrChunks step nil bs = dematerialize bs
   (\_ -> return nil)
   (liftM . step)
   join
-
 {-# INLINE foldrChunks #-}
 
 
@@ -403,7 +418,6 @@ foldrChunksM step nil bs = dematerialize bs
   (\_ -> nil)
   step
   join
-
 {-# INLINE foldrChunksM #-}
 --  (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
 
@@ -514,7 +528,7 @@ nextChunk (Go m) = m >>= nextChunk
 -- -- | /O(1)/ Extract the elements after the head of a ByteString, which must be
 -- -- non-empty.
 -- tail :: ByteString -> ByteString
--- tail Empty          = errorEmptyList "tail"
+-- tail Empty          = errorEmptyStream "tail"
 -- tail (Chunk c cs)
 --   | S.length c == 1 = cs
 --   | otherwise       = Chunk (S.unsafeTail c) cs
@@ -523,7 +537,7 @@ nextChunk (Go m) = m >>= nextChunk
 -- -- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
 -- -- and non-empty.
 -- last :: ByteString -> Word8
--- last Empty          = errorEmptyList "last"
+-- last Empty          = errorEmptyStream "last"
 -- last (Chunk c0 cs0) = go c0 cs0
 --   where go c Empty        = S.unsafeLast c
 --         go _ (Chunk c cs) = go c cs
@@ -531,7 +545,7 @@ nextChunk (Go m) = m >>= nextChunk
 --
 -- -- | /O(n\/c)/ Return all the elements of a 'ByteString' except the last one.
 -- init :: ByteString -> ByteString
--- init Empty          = errorEmptyList "init"
+-- init Empty          = errorEmptyStream "init"
 -- init (Chunk c0 cs0) = go c0 cs0
 --   where go c Empty | S.length c == 1 = Empty
 --                    | otherwise       = Chunk (S.unsafeInit c) Empty
@@ -579,9 +593,10 @@ map f z = dematerialize z
 --
 -- -- | The 'intersperse' function takes a 'Word8' and a 'ByteString' and
 -- -- \`intersperses\' that byte between the elements of the 'ByteString'.
--- -- It is analogous to the intersperse function on Lists.
+-- -- It is analogous to the intersperse function on Streams.
 intersperse :: Monad m => Word8 -> ByteString m r -> ByteString m r
 intersperse _ (Empty r)    = Empty r
+intersperse w (Go m)       = Go (liftM (intersperse w) m)
 intersperse w (Chunk c cs) = Chunk (S.intersperse w c)
                                    (dematerialize cs Empty (Chunk . intersperse') Go)
   where intersperse' :: P.ByteString -> P.ByteString
@@ -590,13 +605,30 @@ intersperse w (Chunk c cs) = Chunk (S.intersperse w c)
             poke p' w
             S.c_intersperse (p' `plusPtr` 1) (p `plusPtr` o) (fromIntegral l) w
 
+intersperse'' :: Monad m => Word8 -> ByteString m r -> ByteString m r
+intersperse'' w bs = dematerialize bs
+    Empty
+    (\c cs -> Chunk (S.intersperse w c)
+                    (dematerialize cs Empty (Chunk . intersperse') Go))
+    Go
+  where 
+  intersperse' :: P.ByteString -> P.ByteString
+  intersperse' (S.PS fp o l) =
+    S.unsafeCreate (2*l) $ \p' -> withForeignPtr fp $ \p -> do
+      poke p' w
+      S.c_intersperse (p' `plusPtr` 1) (p `plusPtr` o) (fromIntegral l) w
+
+-- dematerialize :: Monad m
+-- => ByteString m r
+-- -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
+
 -- -- | The 'transpose' function transposes the rows and columns of its
 -- -- 'ByteString' argument.
 -- transpose :: [ByteString] -> [ByteString]
 -- transpose css = L.map (\ss -> Chunk (S.pack ss) Empty)
 --                       (L.transpose (L.map unpack css))
 -- --TODO: make this fast
---
+
 -- -- ---------------------------------------------------------------------
 -- -- Reducing 'ByteString's
 fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b
@@ -604,11 +636,11 @@ fold step begin done p0 = loop p0 begin
   where
     loop p !x = case p of
         Chunk bs bss -> loop bss $! S.foldl' step x bs
-        Go    m    -> m >>= \p' -> loop p' x
+        Go    m      -> m >>= \p' -> loop p' x
         Empty _      -> return (done x)
 {-# INLINABLE fold #-}
 
---
+
 
 -- | A strict version of 'foldl'.
 -- foldl'           :: forall a b . (b -> a -> b) -> b -> [a] -> b
@@ -651,24 +683,24 @@ fold' step begin done p0 = loop p0 begin
 -- -- (typically the right-identity of the operator), and a ByteString,
 -- -- reduces the ByteString using the binary operator, from right to left.
 foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a
-foldr k z cs = foldrChunks (flip (S.foldr k)) z cs
+foldr k  = foldrChunks (flip (S.foldr k))
 {-# INLINE foldr #-}
 -- --
 -- -- | 'foldl1' is a variant of 'foldl' that has no starting value
 -- -- argument, and thus must be applied to non-empty 'ByteStrings'.
 -- foldl1 :: (Word8 -> Word8 -> Word8) -> ByteString -> Word8
--- foldl1 _ Empty        = errorEmptyList "foldl1"
+-- foldl1 _ Empty        = errorEmptyStream "foldl1"
 -- foldl1 f (Chunk c cs) = foldl f (S.unsafeHead c) (Chunk (S.unsafeTail c) cs)
 --
 -- -- | 'foldl1\'' is like 'foldl1', but strict in the accumulator.
 -- foldl1' :: (Word8 -> Word8 -> Word8) -> ByteString -> Word8
--- foldl1' _ Empty        = errorEmptyList "foldl1'"
+-- foldl1' _ Empty        = errorEmptyStream "foldl1'"
 -- foldl1' f (Chunk c cs) = foldl' f (S.unsafeHead c) (Chunk (S.unsafeTail c) cs)
 --
 -- -- | 'foldr1' is a variant of 'foldr' that has no starting value argument,
 -- -- and thus must be applied to non-empty 'ByteString's
 -- foldr1 :: (Word8 -> Word8 -> Word8) -> ByteString -> Word8
--- foldr1 _ Empty          = errorEmptyList "foldr1"
+-- foldr1 _ Empty          = errorEmptyStream "foldr1"
 -- foldr1 f (Chunk c0 cs0) = go c0 cs0
 --   where go c Empty         = S.foldr1 f c
 --         go c (Chunk c' cs) = S.foldr  f (go c' cs) c
@@ -718,14 +750,14 @@ concat css0 = to css0
 --
 -- -- | /O(n)/ 'maximum' returns the maximum value from a 'ByteString'
 -- maximum :: ByteString -> Word8
--- maximum Empty        = errorEmptyList "maximum"
+-- maximum Empty        = errorEmptyStream "maximum"
 -- maximum (Chunk c cs) = foldlChunks (\n c' -> n `max` S.maximum c')
 --                                    (S.maximum c) cs
 -- {-# INLINE maximum #-}
 --
 -- -- | /O(n)/ 'minimum' returns the minimum value from a 'ByteString'
 -- minimum :: ByteString -> Word8
--- minimum Empty        = errorEmptyList "minimum"
+-- minimum Empty        = errorEmptyStream "minimum"
 -- minimum (Chunk c cs) = foldlChunks (\n c' -> n `min` S.minimum c')
 --                                      (S.minimum c) cs
 -- {-# INLINE minimum #-}
@@ -808,10 +840,10 @@ repeat w = cs where cs = Chunk (S.replicate BI.smallChunkSize w) cs
 -- the infinite repetition of the original ByteString.
 --
 cycle :: Monad m => ByteString m r -> ByteString m s
-cycle (Empty _) = error "cycle" -- errorEmptyList "cycle"
+cycle (Empty _) = error "cycle" -- errorEmptyStream "cycle"
 cycle cs    = cs >> cycle cs -- ' where cs' = foldrChunks Chunk cs' cs
 
--- | /O(n)/ The 'unfoldr' function is analogous to the List \'unfoldr\'.
+-- | /O(n)/ The 'unfoldr' function is analogous to the Stream \'unfoldr\'.
 -- 'unfoldr' builds a ByteString from a seed value.  The function takes
 -- the element and returns 'Nothing' if it is done producing the
 -- ByteString or returns 'Just' @(a,b)@, in which case, @a@ is a
@@ -982,18 +1014,24 @@ span p = break (not . p)
 -- -- > splitWith (=='a') "aabbaca" == ["","","bb","c",""]
 -- -- > splitWith (=='a') []        == []
 -- --
-splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> List (ByteString m) m r
+splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r
 splitWith _ (Empty r)      = Return r
 splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
-
-   where -- comb :: [P.ByteString] -> [P.ByteString] -> ByteString -> [ByteString]
-          comb acc (s:[]) (Empty r)    = Step (revChunks (s:acc) (Return r))
-          comb acc (s:[]) (Chunk c cs) = comb (s:acc) (S.splitWith p c) cs
-          comb acc b (Go m)            = Wrap (liftM (comb acc b) m)
-          comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
+  where 
+-- comb :: [P.ByteString] -> [P.ByteString] -> ByteString -> [ByteString]
+--  comb acc (s:[]) (Empty r)    = Step (revChunks (s:acc) (Return r))
+  comb acc [s] (Empty r)    = Step $ L.foldl' (flip Chunk) 
+                                              (Empty (Return r)) 
+                                              (s:acc) 
+  comb acc [s] (Chunk c cs) = comb (s:acc) (S.splitWith p c) cs
+  comb acc b (Go m)         = Delay (liftM (comb acc b) m)
+  comb acc (s:ss) cs        = Step $ L.foldl' (flip Chunk)  
+                                              (Empty (comb [] ss cs)) 
+                                              (s:acc)
+--  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
 
 {-# INLINE splitWith #-}
-
+-- revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
 -- | /O(n)/ Break a 'ByteString' into pieces separated by the byte
 -- argument, consuming the delimiter. I.e.
 --
@@ -1010,18 +1048,23 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
 -- not copy the substrings, it just constructs new 'ByteStrings' that
 -- are slices of the original.
 --
-split :: Monad m => Word8 -> ByteString m r -> List (ByteString m) m r
-split w = loop SPEC
+split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r
+split w = loop 
   where
-  loop !_ x = case x of
-    Empty r      ->  Return r
-    Go m         -> Wrap $ liftM (loop SPEC) m
-    Chunk c0 cs0 -> comb SPEC [] (S.split w c0) cs0
-  comb !_ acc (s:[]) (Empty r)    = Step $ revChunks (s:acc) (Return r)
-  comb !_ acc (s:[]) (Chunk c cs) = comb SPEC (s:acc) (S.split w c) cs
-  comb !_ acc b (Go m)            = Wrap (liftM (comb SPEC acc b) m)
-  comb !_ acc (s:ss) cs           = Step $ revChunks (s:acc) (comb SPEC [] ss cs)
+  loop !x = case x of
+    Empty r      -> Return r
+    Go m         -> Delay $ liftM loop m
+    Chunk c0 cs0 -> comb [] (S.split w c0) cs0
+  comb !acc [] (Empty r)       = Step $ revChunks acc (Return r)
+  comb acc [] (Chunk c cs)     = comb acc (S.split w c) cs
+  comb !acc (s:[]) (Empty r)   = Step $ revChunks (s:acc) (Return r)
+  comb acc (s:[]) (Chunk c cs) = comb (s:acc) (S.split w c) cs
+  comb acc b (Go m)            = Delay (liftM (comb acc b) m)
+  comb acc (s:ss) cs           = Step $ revChunks (s:acc) (comb [] ss cs)
 {-# INLINE split #-}
+
+-- maps morph = buildStream . F.maps morph . foldStream
+
 --
 -- | The 'group' function take`5s a ByteString and returns a list of
 -- ByteStrings such that the concatenation of the result is equal to the
@@ -1032,7 +1075,7 @@ split w = loop SPEC
 --
 -- It is a special case of 'groupBy', which allows the programmer to
 -- supply their own equality test.
-group :: Monad m => ByteString m r -> List (ByteString m) m r
+group :: Monad m => ByteString m r -> Stream (ByteString m) m r
 group = go
   where
   go (Empty r)       = Return r
@@ -1041,13 +1084,18 @@ group = go
     | otherwise        = Step $ to [S.unsafeTake 1 c] (S.unsafeHead c)
                                      (Chunk (S.unsafeTail c) cs)
 
-  to acc !_ (Empty r)        = revNonEmptyChunks acc  (Empty (Return r))
+  to acc !_ (Empty r)        = revNonEmptyChunks 
+                                     acc  
+                                     (Empty (Return r))
   to acc !w (Chunk c cs) =
     case findIndexOrEnd (/= w) c of
-      0                    -> revNonEmptyChunks acc (Empty (go (Chunk c cs)))
+      0                    -> revNonEmptyChunks 
+                                    acc 
+                                    (Empty (go (Chunk c cs)))
       n | n == S.length c  -> to (S.unsafeTake n c : acc) w cs
-        | otherwise        -> revNonEmptyChunks (S.unsafeTake n c : acc)
-                                        (Empty (go (Chunk (S.unsafeDrop n c) cs)))
+        | otherwise        -> revNonEmptyChunks 
+                                    (S.unsafeTake n c : acc)
+                                    (Empty (go (Chunk (S.unsafeDrop n c) cs)))
 
 -- -- | The 'groupBy' function is the non-overloaded version of 'group'.
 -- --
@@ -1071,15 +1119,16 @@ group = go
 -- | /O(n)/ The 'intercalate' function takes a 'ByteString' and a list of
 -- 'ByteString's and concatenates the list after interspersing the first
 -- argument between each element of the list.
-intercalate :: Monad m => ByteString m () -> List (ByteString m) m r -> ByteString m r
+intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r
 intercalate s (Return r) = Empty r
-intercalate s (Wrap m) = Go $ liftM (intercalate s) m
+intercalate s (Delay m) = Go $ liftM (intercalate s) m
 intercalate s (Step bsls) = do  -- this isn't quite right yet
   ls <- bsls
-  s >> loop ls
+  s 
+  loop ls
  where
   loop (Return r) =  Empty r -- concat . (L.intersperse s)
-  loop (Wrap m) = Go $ liftM loop m
+  loop (Delay m) = Go $ liftM loop m
   loop (Step bsls) = do
     ls <- bsls
     case ls of
@@ -1197,9 +1246,10 @@ filter :: (Word8 -> Bool) -> ByteString m r -> ByteString m r
 filter p s = go s
     where
         go (Empty r )   = Empty r
-        go (Chunk x xs) = chunk (S.filter p x) (go xs)
+        go (Chunk x xs) = chunk (S.filter p x) (go xs) 
+                            -- should inspect for null
 {-# INLINE filter #-}
---
+
 -- {-
 -- -- | /O(n)/ and /O(n\/c) space/ A first order equivalent of /filter .
 -- -- (==)/, for the common case of filtering a single byte. It is more
@@ -1360,18 +1410,17 @@ filter p s = go s
 -- -- 'System.IO.hSetBinaryMode' for 'hGetContentsN' to
 -- -- work correctly.
 --
-hGetContentsN :: Int -> Handle ->  ByteString IO ()
+hGetContentsN :: Int -> Handle -> ByteString IO ()
 hGetContentsN k h = loop -- TODO close on exceptions
   where
 --    lazyRead = unsafeInterleaveIO loop
-
     loop = do
-        c <- liftIO (S.hGetSome h k )-- only blocks if there is no data available
+        c <- liftIO (S.hGetSome h k)
+        -- only blocks if there is no data available
         if S.null c
-          then Go $ do
-             hClose h
-             return (Empty ())
+          then Go $ hClose h >> return (Empty ())
           else Chunk c loop
+{-#INLINE hGetContentsN #-} -- very effective inline pragma
 
 -- | Read @n@ bytes into a 'ByteString', directly from the
 -- specified 'Handle', in chunks of size @k@.
@@ -1382,18 +1431,18 @@ hGetN k h n | n > 0 = readChunks n
     readChunks !i = Go $ do
         c <- S.hGet h (min k i)
         case S.length c of
-            0 ->  return $ Empty ()
+            0 -> return $ Empty ()
             m -> return $ Chunk c (readChunks (i - m))
 
 hGetN _ _ 0 = Empty ()
 hGetN _ h n = liftIO $ illegalBufferSize h "hGet" n  -- <--- REPAIR !!!
-
+{-#INLINE hGetN #-}
 -- | hGetNonBlockingN is similar to 'hGetContentsN', except that it will never block
 -- waiting for data to become available, instead it returns only whatever data
 -- is available. Chunks are read on demand, in @k@-sized chunks.
 --
 hGetNonBlockingN :: Int -> Handle -> Int ->  ByteString IO ()
-hGetNonBlockingN k h n | n > 0= readChunks n
+hGetNonBlockingN k h n | n > 0 = readChunks n
   where
     readChunks !i = Go $ do
         c <- S.hGetNonBlocking h (min k i)
@@ -1478,7 +1527,12 @@ getContents = hGetContents IO.stdin
 -- | Outputs a 'ByteString' to the specified 'Handle'.
 --
 hPut :: Handle -> ByteString IO r -> IO r
-hPut h cs = dematerialize cs return (\x y  -> S.hPut h x >> y) (>>= id)
+hPut h cs = dematerialize cs return (\x y -> S.hPut h x >> y) (>>= id)
+  -- loop where
+  -- loop b = case b of
+  --   Empty r -> return r
+  --   Chunk bs rest -> S.hPut h bs >> loop rest
+  --   Go m -> m >>= loop
 {-#INLINE hPut #-}
 
 -- | Pipes nomenclature for hPut
@@ -1538,25 +1592,30 @@ interact transformer = stdout (transformer stdin)
 --
 -- -- Common up near identical calls to `error' to reduce the number
 -- -- constant strings created when compiled:
--- errorEmptyList :: String -> a
--- errorEmptyList fun = moduleError fun "empty ByteString"
--- {-# NOINLINE errorEmptyList #-}
+-- errorEmptyStream :: String -> a
+-- errorEmptyStream fun = moduleError fun "empty ByteString"
+-- {-# NOINLINE errorEmptyStream #-}
 --
 -- moduleError :: String -> String -> a
 -- moduleError fun msg = error ("Data.ByteString.Lazy." ++ fun ++ ':':' ':msg)
 -- {-# NOINLINE moduleError #-}
 
 revNonEmptyChunks :: [P.ByteString] -> ByteString m r -> ByteString m r
-revNonEmptyChunks xs p = loop p xs
-  where
-    loop !bss [] = bss
-    loop bss (b:bs) = loop (Chunk b bss) bs
+revNonEmptyChunks = Prelude.foldr (\bs f -> Chunk bs . f) id 
+{-#INLINE revNonEmptyChunks#-}
+  -- loop p xs
+  -- where
+  --   loop !bss [] = bss
+  --   loop bss (b:bs) = loop (Chunk b bss) bs
+  --   loop' [] = id
+  --   loop' (b:bs) = loop' bs . Chunk b
 -- L.foldl' (flip Chunk) Empty cs
+-- foldr :: Foldable t => (a -> b -> b) -> b -> t a -> b
 
 -- reverse a list of possibly-empty chunks into a lazy ByteString
 revChunks :: Monad m => [P.ByteString] -> r -> ByteString m r
-revChunks cs r = L.foldl' (flip chunk) (Empty r) cs
-
+revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
+{-#INLINE revChunks #-}
 -- | 'findIndexOrEnd' is a variant of findIndex, that returns the length
 -- of the string if no element is found, rather than Nothing.
 findIndexOrEnd :: (Word8 -> Bool) -> P.ByteString -> Int
@@ -1571,21 +1630,18 @@ findIndexOrEnd k (S.PS x s l) =
                                   else go (ptr `plusPtr` 1) (n+1)
 {-# INLINE findIndexOrEnd #-}
 
-
-
-
-zipWithList
+zipWithStream
   :: (Monad m)
   =>  (forall x . a -> ByteString m x -> ByteString m x)
   -> [a]
-  -> List (ByteString m) m r
-  -> List (ByteString m) m r
-zipWithList op zs = loop zs
+  -> Stream (ByteString m) m r
+  -> Stream (ByteString m) m r
+zipWithStream op zs = loop zs
   where
     loop [] !ls      = loop zs ls
     loop a@(x:xs)  ls = case ls of
       Return r -> Return r
       Step fls -> Step $ fmap (loop xs) (op x fls)
-      Wrap mls -> Wrap $ liftM (loop a) mls
+      Delay mls -> Delay $ liftM (loop a) mls
 
-{-#INLINE zipWithList #-}
+{-#INLINE zipWithStream #-}

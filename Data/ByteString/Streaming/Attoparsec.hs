@@ -37,8 +37,6 @@ module Data.ByteString.Streaming.Attoparsec
     where
 
 import Control.DeepSeq (NFData(rnf))
--- import Data.ByteString.Lazy.Internal (ByteString(..), chunk)
-import qualified Data.List as L (intercalate)
 import qualified Data.ByteString as B
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Except
@@ -49,8 +47,7 @@ import qualified Data.Attoparsec.Internal.Types as T
 import Data.Attoparsec.ByteString
     hiding (IResult(..), Result, eitherResult, maybeResult,
             parse, parseWith, parseTest)
-import Data.ByteString.Streaming.Internal.Type hiding (yield)
-import qualified Data.ByteString.Streaming.Internal.Type as Type
+import Stream.Types 
 import Data.ByteString.Streaming
 
 
@@ -94,17 +91,17 @@ parsed
   :: Monad m
   => A.Parser a  -- ^ Attoparsec parser
   -> ByteString m r         -- ^ Raw input
-  -> List (Of a) m (Either (([String],String), ByteString m r) r)
+  -> Stream (Of a) m (Either (([String],String), ByteString m r) r)
 parsed parser = go
   where
     go p0 = do
       x <- lift (nextChunk p0)
       case x of
-        Left r       -> return (Right r)
+        Left r       -> Return (Right r)
         Right (bs,p1) -> step (yield bs >>) (A.parse parser bs) p1
     step diffP res p0 = case res of
-      A.Fail _ c m -> return (Left ((c,m), diffP p0))
-      A.Done bs b   -> Type.yield b >> go (yield bs >> p0)
+      A.Fail _ c m -> Return (Left ((c,m), diffP p0))
+      A.Done bs b  -> Step (b :> go (yield bs >> p0))
       A.Partial k  -> do
         x <- lift (nextChunk p0)
         case x of

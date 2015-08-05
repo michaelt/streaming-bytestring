@@ -14,6 +14,8 @@ import Data.Conduit
 import Data.Monoid
 import Lens.Simple
 import Data.Char
+import Stream.Prelude (maps)
+
 main = 
   IO.withFile "txt/words3b.txt" IO.ReadMode  $ \hIn  ->
   IO.withFile "txt/words3c.txt" IO.WriteMode $ \hOut -> 
@@ -29,9 +31,8 @@ main =
        []              -> info
  where 
    info = putStrLn "lazy conduit pipe streaming"
-  
 
-s x = S.unlines (S.maps ( S.yield "!" >>)  (S.lines x))
+s x = S.unlines (maps ( S.Chunk "!")  (S.lines x))
 l x = LC.unlines (map ("!" <>)  (LC.lines x))
 p = over PB.lines (PG.maps (Pipes.yield "!" >>))
 c = CB.lines =$= go 
@@ -44,6 +45,7 @@ c = CB.lines =$= go
          yield "\n"
          yield x
          go
+         
 -- ss  = S.unlines . S.zipWithList S.Chunk titles . S.lines
 -- ll = LC.unlines . zipWith (\x y -> LC.fromStrict x <> y) titles . LC.lines
 

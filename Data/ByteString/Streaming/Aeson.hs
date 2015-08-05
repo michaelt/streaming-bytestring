@@ -25,9 +25,10 @@ import qualified Data.ByteString.Internal         as S (isSpaceWord8)
 import           Data.Data                        (Data, Typeable)
 -- import           Pipes
 import qualified Data.ByteString.Streaming.Attoparsec  as PA
-import           Data.ByteString.Streaming hiding (yield)
+import           Data.ByteString.Streaming 
 import qualified Data.ByteString.Streaming as B
-import           Data.ByteString.Streaming.Internal.Type
+import Stream.Types 
+
 
 --------------------------------------------------------------------------------
 type Parser m a = forall x . StateT (ByteString m x) m a
@@ -81,24 +82,24 @@ decode = do
 
 decoded  :: (Monad m, Ae.FromJSON a) =>
      ByteString m r
-     -> List (Of a) m (Either (DecodingError, ByteString m r) r)
+     -> Stream (Of a) m (Either (DecodingError, ByteString m r) r)
 decoded = consecutively decode 
   where
   consecutively
     :: (Monad m)
     => StateT (ByteString m r) m (Either e a)
     -> ByteString m r  
-    -> List (Of a) m (Either (e, ByteString m r) r)
+    -> Stream (Of a) m (Either (e, ByteString m r) r)
   consecutively parser = step where
     step p0 = do
       x <- lift $ nextSkipBlank p0
       case x of
-        Left r -> return (Right r)
+        Left r -> Return (Right r)
         Right (bs, p1) -> do
           (mea, p2) <- lift $ S.runStateT parser (Chunk bs p1)
           case mea of
-            Right a -> yield a >> step p2
-            Left  e -> return (Left (e, p2))
+            Right a -> Step (a :> step p2)
+            Left  e -> Return (Left (e, p2))
 
 -- | Like 'Pipes.next', except it skips leading whitespace and 'B.null' chunks.
   

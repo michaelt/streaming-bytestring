@@ -47,7 +47,7 @@ import qualified Data.Attoparsec.Internal.Types as T
 import Data.Attoparsec.ByteString
     hiding (IResult(..), Result, eitherResult, maybeResult,
             parse, parseWith, parseTest)
-import Stream.Types 
+import Streaming.Internal
 import Data.ByteString.Streaming
 
 

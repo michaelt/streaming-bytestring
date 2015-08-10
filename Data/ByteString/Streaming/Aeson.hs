@@ -27,7 +27,7 @@ import           Data.Data                        (Data, Typeable)
 import qualified Data.ByteString.Streaming.Attoparsec  as PA
 import           Data.ByteString.Streaming 
 import qualified Data.ByteString.Streaming as B
-import Stream.Types 
+import Streaming.Internal
 
 
 --------------------------------------------------------------------------------

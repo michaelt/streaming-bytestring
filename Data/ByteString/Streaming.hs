@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP, BangPatterns #-}
 {-#LANGUAGE RankNTypes, GADTs #-}
--- This library emulates Data.ByteString.Lazy but includes a little 'FreeT' library
+-- This library emulates Data.ByteString.Lazy but includes a monadic element
+-- and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
 
 -- |
 -- Module      : Data.ByteString.Lazy

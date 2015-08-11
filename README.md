@@ -112,8 +112,5 @@ Here the types clearly express the transition from the world of
 amorphously chunked bytestreams to the world of significant individual 
 ByteStrings.  
 
-`produceLines` however we express it is a somewhat dangerous idea, since
-as we imagined it, it places no restriction on the length of the individual
-lines (a point taken account of in `conduit`)
 
 

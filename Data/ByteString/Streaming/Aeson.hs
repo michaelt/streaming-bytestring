@@ -14,7 +14,6 @@ module Data.ByteString.Streaming.Aeson
   ) where
 import           Control.Exception                (Exception)
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Error        (Error)
 import qualified Control.Monad.Trans.State.Strict as S
 import           Control.Monad.Trans.State.Strict (StateT(..))
 
@@ -45,7 +44,6 @@ data DecodingError
   deriving (Show, Eq, Data, Typeable)
 
 instance Exception DecodingError
-instance Error     DecodingError
 
 -- | This instance allows using 'Pipes.Lift.errorP' with 'Pipes.Aeson.decoded'
 -- and 'Pipes.Aeson.decodedL'

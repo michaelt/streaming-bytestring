@@ -124,7 +124,7 @@ import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
-import Streaming.Internal hiding (yield, uncons, concat, append, materialize, dematerialize)
+import Streaming.Internal hiding (yield, uncons, concat, concats, append, materialize, dematerialize)
 import qualified Streaming.Internal as Type
 
 import Data.Monoid

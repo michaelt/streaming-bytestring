@@ -64,6 +64,19 @@ and the `conduit` `linesUnboundedAscii`
 be a succession of anyhow-chunked bytes; what exits on the right will 
 be a succession of significant individual things of type `ByteString`.  
 
+What we find in `IOStreams.lines` and
+`linesUnlimitedAscii` are comparable to what we would have if `bytestring`
+defined 
+
+    lines :: L.ByteString -> [S.ByteString]
+   
+or more absurdly
+
+    lines :: L.ByteString -> L.ByteString 
+
+and exposed methods for inspecting the hitherto secret chunks contained
+in lazy bytestrings. 
+
 The model employed by the present package is a little different.  First, 
 the primitive `lines` concept is just
 
@@ -74,11 +87,15 @@ this corresponds precisely to
     lines :: ByteString -> [ByteString]
 
 as it appears in `Data.ByteString.Lazy` -- the elements of the list are 
-themselves lazy bytestrings. This, of course, is exactly as it is in 
-`pipes-bytestring`. `pipes-bytestring` attempts to *mean* by 
-`Producer ByteString m r` what we express by `ByteString m r` - the
-undifferentiated byte stream. But the user frequently proposes to inspect
-and work with lines with Pipes themselves and thus needs
+themselves lazy bytestrings. 
+
+This, of course, is exactly as it is in `pipes-bytestring`. 
+`pipes-bytestring` attempts to *mean* by `Producer ByteString m r` 
+what we express by `ByteString m r` - the undifferentiated byte stream.
+But (we are provisionally suggesting) that isn't what `Producer ByteString m r` 
+means, and this is part of the reason why `pipes-bytestring` is difficult 
+for people to grasp. The user frequently proposes to inspect and work 
+with individual lines with Pipes themselves and thus needs
 
     produceLines :: Producer ByteString m r -> Producer ByteString m r
     produceLines = folds B.concat B.empty id . view Pipes.ByteString.lines
@@ -89,11 +106,14 @@ Here we would instead write a
 
 or indeed
 
-    produceLines :: ByteString m r -> Producer ByteString m r
-    
-Here the types clearly express the transition from the world of 
-amorphously chunked byte streams to the world of significant individual 
-ByteStrings.
+    produceLines :: ByteString m r -> Pipes.Producer ByteString m r
 
+Here the types clearly express the transition from the world of 
+amorphously chunked bytestreams to the world of significant individual 
+ByteStrings.  
+
+`produceLines` however we express it is a somewhat dangerous idea, since
+as we imagined it, it places no restriction on the length of the individual
+lines (a point taken account of in `conduit`)
 
 

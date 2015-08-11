@@ -118,7 +118,7 @@ import qualified Data.ByteString.Unsafe as S
 import qualified Data.ByteString.Char8 as Char8
 
 
-import Streaming.Internal hiding (yield, uncons, concat, append)
+import Streaming.Internal hiding (concats, yield, uncons, concat, append)
 import qualified Streaming.Internal as Type
 import qualified Streaming.Internal.Folding as F
 

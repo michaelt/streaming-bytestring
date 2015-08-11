@@ -339,16 +339,19 @@ pack = packBytes
 -- unpack = unpackBytes
 
 -- | /O(c)/ Convert a list of strict 'ByteString' into a lazy 'ByteString'
-fromChunks :: Monad m => [P.ByteString] -> ByteString m ()
-fromChunks cs = L.foldr chunk (Empty ()) cs
+fromChunks :: Monad m => Stream (Of P.ByteString) m r -> ByteString m r
+fromChunks cs = destroy cs 
+  (\(bs :> rest) -> Chunk bs rest)
+  Go
+  return
 
 -- -- | /O(c)/ Convert a lazy 'ByteString' into a list of strict 'ByteString'
-toChunks :: Monad m => ByteString m () -> m [P.ByteString]
+toChunks :: Monad m => ByteString m r -> Stream (Of P.ByteString) m r
 toChunks bs =
   dematerialize bs
-      (\() -> return [])
-      (\b mx -> liftM (b:) mx)
-      join
+      return
+      (\b mx -> Step (b:> mx))
+      Delay
   -- type ByteString_ m r =
     -- (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
 
@@ -368,31 +371,31 @@ fromStrict bs | S.null bs = Empty ()
 toStrict :: Monad m => ByteString m () -> m (S.ByteString)
 toStrict bs = dematerialize bs
   (\r -> return S.empty)
-  (\bs mbs -> liftM (S.append bs) mbs)
+  (\bs mbs -> liftM (S.append bs) mbs) -- this is not right, recopies quadratically.
   join
 
-toStrict' cs0 =
-  do bss <- toChunks cs0
-     let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
-     return $ S.unsafeCreate totalLen $ \ptr -> go bss ptr
-  where
-    go []                      !_       = return ()
-    go (S.PS fp off len : cs) !destptr =
-      withForeignPtr fp $ \p -> do
-        S.memcpy destptr (p `plusPtr` off) len
-        go cs (destptr `plusPtr` len)
-
-toStrict'' :: MonadIO m => ByteString m () -> m (S.ByteString)
-toStrict'' cs0 =
-  do bss <- toChunks cs0
-     let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
-     liftIO $ S.create totalLen $ \ptr -> go bss ptr
-  where
-    go []                      !_       = return ()
-    go (S.PS fp off len : cs) !destptr =
-      withForeignPtr fp $ \p -> do
-        S.memcpy destptr (p `plusPtr` off) len
-        go cs (destptr `plusPtr` len)
+-- toStrict' cs0 =
+--   do bss <- toChunks cs0
+--      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
+--      return $ S.unsafeCreate totalLen $ \ptr -> go bss ptr
+--   where
+--     go []                      !_       = return ()
+--     go (S.PS fp off len : cs) !destptr =
+--       withForeignPtr fp $ \p -> do
+--         S.memcpy destptr (p `plusPtr` off) len
+--         go cs (destptr `plusPtr` len)
+--
+-- toStrict'' :: MonadIO m => ByteString m () -> m (S.ByteString)
+-- toStrict'' cs0 =
+--   do bss <- toChunks cs0
+--      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
+--      liftIO $ S.create totalLen $ \ptr -> go bss ptr
+--   where
+--     go []                      !_       = return ()
+--     go (S.PS fp off len : cs) !destptr =
+--       withForeignPtr fp $ \p -> do
+--         S.memcpy destptr (p `plusPtr` off) len
+--         go cs (destptr `plusPtr` len)
 
 toLazy :: Monad m => ByteString m () -> m BI.ByteString
 toLazy bs = dematerialize bs

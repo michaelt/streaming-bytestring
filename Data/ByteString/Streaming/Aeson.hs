@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE RankNTypes         #-}
+-- This is a very close replica of Renzo C's `pipes-aeson`
 
 -- | This module provides internal utilities and it is likely
 -- to be modified in backwards-incompatible ways in the future.

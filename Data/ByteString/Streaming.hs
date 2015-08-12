@@ -46,80 +46,98 @@
 -- Streaming variant by Michael Thompson, following the model of pipes-bytestring
 --
 module Data.ByteString.Streaming (
+    -- * The @ByteString@ type
+    ByteString
 
-   -- * The @ByteString@ type
-   ByteString
-   
-   -- * Introducing and eliminating 'ByteString's from other types
-   , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
-   , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
-   , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
-   , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
-   , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
-   , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
+    -- * Introducing and eliminating 'ByteString's 
+    , empty            -- empty :: ByteString m () 
+    , pack             -- pack :: Monad m => [Word8] -> ByteString m () 
+    , singleton        -- singleton :: Monad m => Word8 -> ByteString m () 
+  
+    , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
+    , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
+    , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
+    , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
+    , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
+    , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
 
+    -- * Transforming ByteStrings
+    , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
+    , intercalate      -- intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r 
+    , intersperse      -- intersperse :: Monad m => Word8 -> ByteString m r -> ByteString m r 
+    
+    -- * Basic interface
+    , cons             -- cons :: Monad m => Word8 -> ByteString m r -> ByteString m r 
+    , cons'            -- cons' :: Word8 -> ByteString m r -> ByteString m r 
+    , append           -- append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s   
+    , filter           -- filter :: (Word8 -> Bool) -> ByteString m r -> ByteString m r 
+    , head             -- head :: Monad m => ByteString m r -> m Word8 
+    , null             -- null :: Monad m => ByteString m r -> m Bool 
+    , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
+    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
+    , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
+    , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
 
-   , append            -- append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s   
-   , break            -- break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
-   , concat           -- concat :: Monad m => [ByteString m ()] -> ByteString m () 
-   , concats          -- concats :: Monad m => Stream (ByteString m) m r -> ByteString m r 
-   , cons             -- cons :: Monad m => Word8 -> ByteString m r -> ByteString m r 
-   , cons'            -- cons' :: Word8 -> ByteString m r -> ByteString m r 
-   , cycle            -- cycle :: Monad m => ByteString m r -> ByteString m s 
-   , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
-   , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
-   , empty            -- empty :: ByteString m () 
-   , filter           -- filter :: (Word8 -> Bool) -> ByteString m r -> ByteString m r 
-   , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
-   , fold'            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
-   , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
+    -- * Substrings
 
-   , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
-   , head             -- head :: Monad m => ByteString m r -> m Word8 
-   , intercalate      -- intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r 
-   , intersperse      -- intersperse :: Monad m => Word8 -> ByteString m r -> ByteString m r 
-   , iterate          -- iterate :: (Word8 -> Word8) -> Word8 -> ByteString m () 
-   , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
-   , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
-   , null             -- null :: Monad m => ByteString m r -> m Bool 
-   , pack             -- pack :: Monad m => [Word8] -> ByteString m () 
-   , repeat           -- repeat :: Word8 -> ByteString m () 
-   , singleton        -- singleton :: Monad m => Word8 -> ByteString m () 
-   , span             -- span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
-   , split            -- split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r 
-   , splitAt          -- splitAt :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m (ByteString m r) 
-   , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
-   , take             -- take :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m () 
-   , takeWhile        -- takeWhile :: (Word8 -> Bool) -> ByteString m r -> ByteString m () 
+    -- ** Breaking strings
+    , break            -- break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
+    , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
+    , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
+    , span             -- span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
+    , splitAt          -- splitAt :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m (ByteString m r) 
+    , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
+    , take             -- take :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m () 
+    , takeWhile        -- takeWhile :: (Word8 -> Bool) -> ByteString m r -> ByteString m () 
 
-   , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
-   , unfoldr          -- unfoldr :: (a -> Maybe (Word8, a)) -> a -> ByteString m () 
-   , zipWithStream  -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
-   
-   -- * I\/O with 'ByteString's
+    -- ** Breaking into many substrings
+    , split            -- split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r 
+    
+    -- ** Special folds
 
-   -- ** Standard input and output
-   , getContents      -- getContents :: ByteString IO () 
-   , stdin            -- stdin :: ByteString IO () 
-   , stdout           -- stdout :: ByteString IO r -> IO r 
-   , interact         -- interact :: (ByteString IO () -> ByteString IO r) -> IO r 
-   
-   -- ** Files
-   , readFile         -- readFile :: FilePath -> ByteString IO () 
-   , writeFile        -- writeFile :: FilePath -> ByteString IO r -> IO r 
-   , appendFile       -- appendFile :: FilePath -> ByteString IO r -> IO r 
-   
-   -- ** I\/O with Handles
-   , fromHandle       -- fromHandle :: Handle -> ByteString IO () 
-   , toHandle         -- toHandle :: Handle -> ByteString IO r -> IO r 
-   , hGet             -- hGet :: Handle -> Int -> ByteString IO () 
-   , hGetContents     -- hGetContents :: Handle -> ByteString IO () 
-   , hGetContentsN    -- hGetContentsN :: Int -> Handle -> ByteString IO () 
-   , hGetN            -- hGetN :: Int -> Handle -> Int -> ByteString IO () 
-   , hGetNonBlocking  -- hGetNonBlocking :: Handle -> Int -> ByteString IO () 
-   , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
-   , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
-   , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
+    , concat           -- concat :: Monad m => [ByteString m ()] -> ByteString m () 
+    , concats          -- concats :: Monad m => Stream (ByteString m) m r -> ByteString m r 
+
+    -- * Building ByteStrings
+    
+    -- ** Infinite ByteStrings
+    , repeat           -- repeat :: Word8 -> ByteString m () 
+    , iterate          -- iterate :: (Word8 -> Word8) -> Word8 -> ByteString m () 
+    , cycle            -- cycle :: Monad m => ByteString m r -> ByteString m s 
+    
+    -- ** Unfolding ByteStrings
+    , unfoldr          -- unfoldr :: (a -> Maybe (Word8, a)) -> a -> ByteString m () 
+    , unfold           -- unfold  :: (a -> Either r (Word8, a)) -> a -> ByteString m r
+
+    -- *  Folds, including support for `Control.Foldl`
+    , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
+    , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
+    , fold'            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
+
+    -- * I\/O with 'ByteString's
+
+    -- ** Standard input and output
+    , getContents      -- getContents :: ByteString IO () 
+    , stdin            -- stdin :: ByteString IO () 
+    , stdout           -- stdout :: ByteString IO r -> IO r 
+    , interact         -- interact :: (ByteString IO () -> ByteString IO r) -> IO r 
+
+    -- ** Files
+    , readFile         -- readFile :: FilePath -> ByteString IO () 
+    , writeFile        -- writeFile :: FilePath -> ByteString IO r -> IO r 
+    , appendFile       -- appendFile :: FilePath -> ByteString IO r -> IO r 
+
+    -- ** I\/O with Handles
+    , fromHandle       -- fromHandle :: Handle -> ByteString IO () 
+    , toHandle         -- toHandle :: Handle -> ByteString IO r -> IO r 
+    , hGet             -- hGet :: Handle -> Int -> ByteString IO () 
+    , hGetContents     -- hGetContents :: Handle -> ByteString IO () 
+    , hGetContentsN    -- hGetContentsN :: Int -> Handle -> ByteString IO () 
+    , hGetN            -- hGetN :: Int -> Handle -> Int -> ByteString IO () 
+    , hGetNonBlocking  -- hGetNonBlocking :: Handle -> Int -> ByteString IO () 
+    , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
+    , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
+    , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
   ) where
 
 import Prelude hiding
@@ -644,6 +662,7 @@ cycle cs    = cs >> cycle cs -- ' where cs' = foldrChunks Chunk cs' cs
 -- ByteString or returns 'Just' @(a,b)@, in which case, @a@ is a
 -- prepending to the ByteString and @b@ is used as the next element in a
 -- recursive call.
+
 unfoldr :: (a -> Maybe (Word8, a)) -> a -> ByteString m ()
 unfoldr f s0 = unfoldChunk 32 s0
   where unfoldChunk n s =
@@ -652,36 +671,17 @@ unfoldr f s0 = unfoldChunk 32 s0
               | S.null c  -> Empty ()
               | otherwise -> Chunk c (Empty ())
             (c, Just s')  -> Chunk c (unfoldChunk (n*2) s')
---
--- unfoldr' :: (a -> Maybe (Word8, a)) -> a -> P.ByteString
--- unfoldr' f = Type.concat . unfoldChunk 32 64
---   where unfoldChunk n n' x =
---           case unfoldrN' n f x of
---             (s, Nothing) -> s : []
---             (s, Just x') -> s : unfoldChunk n' (n+n') x'
--- {-# INLINE unfoldr #-}
 
--- | /O(n)/ Like 'unfoldr', 'unfoldrN' builds a ByteString from a seed
--- value.  However, the length of the result is limited by the first
--- argument to 'unfoldrN'.  This function is more efficient than 'unfoldr'
--- when the maximum length of the result is known.
---
--- The following equation relates 'unfoldrN' and 'unfoldr':
---
--- > fst (unfoldrN n f s) == take n (unfoldr f s)
---
--- unfoldrN' :: Int -> (a -> Maybe (Word8, a)) -> a -> (P.ByteString, Maybe a)
--- unfoldrN' i f x0
---     | i < 0     = (empty, Just x0)
---     | otherwise = unsafePerformIO $ S.createAndTrim' i $ \p -> go p x0 0
---   where
---     go !p !x !n
---       | n == i    = return (0, n, Just x)
---       | otherwise = case f x of
---                       Nothing     -> return (0, n, Nothing)
---                       Just (w,x') -> do poke p w
---                                         go (p `plusPtr` 1) x' (n+1)
--- {-# INLINE unfoldrN' #-}
+unfold :: (a -> Either r (Word8, a)) -> a -> ByteString m r
+unfold f s0 = unfoldChunk 32 s0
+  where unfoldChunk n s =
+          case unfoldrNE n f s of
+            (c, Left r)
+              | S.null c  -> Empty r
+              | otherwise -> Chunk c (Empty r)
+            (c, Right s') -> Chunk c (unfoldChunk (n*2) s')
+
+
 -- ---------------------------------------------------------------------
 -- Substrings
 
@@ -710,6 +710,7 @@ drop i cs0 = drop' i cs0
             then Chunk (S.drop (fromIntegral n) c) cs
             else drop' (n - fromIntegral (S.length c)) cs
         drop' n (Go m) = Go (liftM (drop' n) m)
+        
 -- | /O(n\/c)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Monad m => Int64 -> ByteString m r -> ByteString m (ByteString m r)
 splitAt i cs0 | i <= 0 = Empty cs0
@@ -801,14 +802,14 @@ break f cs0 = break' cs0
 span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r)
 span p = break (not . p)
 
--- -- | /O(n)/ Splits a 'ByteString' into components delimited by
--- -- separators, where the predicate returns True for a separator element.
--- -- The resulting components do not contain the separators.  Two adjacent
--- -- separators result in an empty component in the output.  eg.
--- --
--- -- > splitWith (=='a') "aabbaca" == ["","","bb","c",""]
--- -- > splitWith (=='a') []        == []
--- --
+-- | /O(n)/ Splits a 'ByteString' into components delimited by
+-- separators, where the predicate returns True for a separator element.
+-- The resulting components do not contain the separators.  Two adjacent
+-- separators result in an empty component in the output.  eg.
+--
+-- > splitWith (=='a') "aabbaca" == ["","","bb","c",""]
+-- > splitWith (=='a') []        == []
+--
 splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r
 splitWith _ (Empty r)      = Return r
 splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
@@ -826,7 +827,7 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
 --  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
 
 {-# INLINE splitWith #-}
--- revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
+
 -- | /O(n)/ Break a 'ByteString' into pieces separated by the byte
 -- argument, consuming the delimiter. I.e.
 --
@@ -858,7 +859,6 @@ split w = loop
   comb acc (s:ss) cs           = Step $ revChunks (s:acc) (comb [] ss cs)
 {-# INLINE split #-}
 
--- maps morph = buildStream . F.maps morph . foldStream
 
 --
 -- | The 'group' function take`5s a ByteString and returns a list of
@@ -870,6 +870,7 @@ split w = loop
 --
 -- It is a special case of 'groupBy', which allows the programmer to
 -- supply their own equality test.
+
 group :: Monad m => ByteString m r -> Stream (ByteString m) m r
 group = go
   where
@@ -930,57 +931,7 @@ intercalate s (Step bsls) = do  -- this isn't quite right yet
       Return r -> Empty r  -- no '\n' before end, in this case.
       x -> s >> loop x
 
--- -- ---------------------------------------------------------------------
--- -- Indexing ByteStrings
---
--- -- | /O(c)/ 'ByteString' index (subscript) operator, starting from 0.
--- index :: ByteString -> Int64 -> Word8
--- index _  i | i < 0  = moduleError "index" ("negative index: " ++ show i)
--- index cs0 i         = index' cs0 i
---   where index' Empty     n = moduleError "index" ("index too large: " ++ show n)
---         index' (Chunk c cs) n
---           | n >= fromIntegral (S.length c) =
---               index' cs (n - fromIntegral (S.length c))
---           | otherwise       = S.unsafeIndex c (fromIntegral n)
---
--- -- | /O(n)/ The 'elemIndex' function returns the index of the first
--- -- element in the given 'ByteString' which is equal to the query
--- -- element, or 'Nothing' if there is no such element.
--- -- This implementation uses memchr(3).
--- elemIndex :: Word8 -> ByteString -> Maybe Int64
--- elemIndex w cs0 = elemIndex' 0 cs0
---   where elemIndex' _ Empty        = Nothing
---         elemIndex' n (Chunk c cs) =
---           case S.elemIndex w c of
---             Nothing -> elemIndex' (n + fromIntegral (S.length c)) cs
---             Just i  -> Just (n + fromIntegral i)
---
--- -- | /O(n)/ The 'elemIndexEnd' function returns the last index of the
--- -- element in the given 'ByteString' which is equal to the query
--- -- element, or 'Nothing' if there is no such element. The following
--- -- holds:
--- --
--- -- > elemIndexEnd c xs ==
--- -- > (-) (length xs - 1) `fmap` elemIndex c (reverse xs)
---
--- elemIndexEnd :: Word8 -> ByteString -> Maybe Int64
--- elemIndexEnd w = elemIndexEnd' 0
---   where
---     elemIndexEnd' _ Empty = Nothing
---     elemIndexEnd' n (Chunk c cs) =
---       let !n' = n + S.length c
---           !i  = fmap (fromIntegral . (n +)) $ S.elemIndexEnd w c
---       in elemIndexEnd' n' cs `mplus` i
---
--- -- | /O(n)/ The 'elemIndices' function extends 'elemIndex', by returning
--- -- the indices of all elements equal to the query element, in ascending order.
--- -- This implementation uses memchr(3).
--- elemIndices :: Word8 -> ByteString -> [Int64]
--- elemIndices w cs0 = elemIndices' 0 cs0
---   where elemIndices' _ Empty        = []
---         elemIndices' n (Chunk c cs) = L.map ((+n).fromIntegral) (S.elemIndices w c)
---                              ++ elemIndices' (n + fromIntegral (S.length c)) cs
---
+
 -- -- | count returns the number of times its argument appears in the ByteString
 -- --
 -- -- > count = length . elemIndices
@@ -1023,16 +974,8 @@ intercalate s (Step bsls) = do  -- this isn't quite right yet
 --         findIndices' n (Chunk c cs) = L.map ((+n).fromIntegral) (S.findIndices k c)
 --                              ++ findIndices' (n + fromIntegral (S.length c)) cs
 --
--- -- ---------------------------------------------------------------------
--- -- Searching ByteStrings
---
--- -- | /O(n)/ 'elem' is the 'ByteString' membership predicate.
--- elem :: Word8 -> ByteString -> Bool
--- elem w cs = case elemIndex w cs of Nothing -> False ; _ -> True
---
--- -- | /O(n)/ 'notElem' is the inverse of 'elem'
--- notElem :: Word8 -> ByteString -> Bool
--- notElem w cs = not (elem w cs)
+-- ---------------------------------------------------------------------
+-- Searching ByteStrings
 
 -- | /O(n)/ 'filter', applied to a predicate and a ByteString,
 -- returns a ByteString containing those characters that satisfy the
@@ -1078,43 +1021,8 @@ filter p s = go s
 -- filterNotByte :: Word8 -> ByteString -> ByteString
 -- filterNotByte w (LPS xs) = LPS (filterMap (P.filterNotByte w) xs)
 -- -}
---
--- -- | /O(n)/ The 'partition' function takes a predicate a ByteString and returns
--- -- the pair of ByteStrings with elements which do and do not satisfy the
--- -- predicate, respectively; i.e.,
--- --
--- -- > partition p bs == (filter p xs, filter (not . p) xs)
--- --
--- partition :: (Word8 -> Bool) -> ByteString -> (ByteString, ByteString)
--- partition f p = (filter f p, filter (not . f) p)
--- --TODO: use a better implementation
---
--- -- ---------------------------------------------------------------------
--- -- Searching for substrings
---
--- -- | /O(n)/ The 'isPrefixOf' function takes two ByteStrings and returns 'True'
--- -- iff the first is a prefix of the second.
--- isPrefixOf :: ByteString -> ByteString -> Bool
--- isPrefixOf Empty _  = True
--- isPrefixOf _ Empty  = False
--- isPrefixOf (Chunk x xs) (Chunk y ys)
---     | S.length x == S.length y = x == y  && isPrefixOf xs ys
---     | S.length x <  S.length y = x == yh && isPrefixOf xs (Chunk yt ys)
---     | otherwise                = xh == y && isPrefixOf (Chunk xt xs) ys
---   where (xh,xt) = S.splitAt (S.length y) x
---         (yh,yt) = S.splitAt (S.length x) y
---
--- -- | /O(n)/ The 'isSuffixOf' function takes two ByteStrings and returns 'True'
--- -- iff the first is a suffix of the second.
--- --
--- -- The following holds:
--- --
--- -- > isSuffixOf x y == reverse x `isPrefixOf` reverse y
--- --
--- isSuffixOf :: ByteString -> ByteString -> Bool
--- isSuffixOf x y = reverse x `isPrefixOf` reverse y
--- --TODO: a better implementation
---
+
+
 -- -- ---------------------------------------------------------------------
 -- -- Zipping
 --
@@ -1151,59 +1059,24 @@ filter p s = go s
 -- unzip ls = (pack (L.map fst ls), pack (L.map snd ls))
 -- {-# INLINE unzip #-}
 --
--- -- ---------------------------------------------------------------------
--- -- Special lists
+
+-- ---------------------------------------------------------------------
+-- ByteString IO
 --
--- -- | /O(n)/ Return all initial segments of the given 'ByteString', shortest first.
--- inits :: ByteString -> [ByteString]
--- inits = (Empty :) . inits'
---   where inits' Empty        = []
---         inits' (Chunk c cs) = L.map (\c' -> Chunk c' Empty) (L.tail (S.inits c))
---                            ++ L.map (Chunk c) (inits' cs)
+-- Rule for when to close: is it expected to read the whole file?
+-- If so, close when done.
 --
--- -- | /O(n)/ Return all final segments of the given 'ByteString', longest first.
--- tails :: ByteString -> [ByteString]
--- tails Empty         = Empty : []
--- tails cs@(Chunk c cs')
---   | S.length c == 1 = cs : tails cs'
---   | otherwise       = cs : tails (Chunk (S.unsafeTail c) cs')
+
+-- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
+-- are read on demand, in at most @k@-sized chunks. It does not block
+-- waiting for a whole @k@-sized chunk, so if less than @k@ bytes are
+-- available then they will be returned immediately as a smaller chunk.
 --
--- -- ---------------------------------------------------------------------
--- -- Low level constructors
+-- The handle is closed on EOF.
 --
--- -- | /O(n)/ Make a copy of the 'ByteString' with its own storage.
--- --   This is mainly useful to allow the rest of the data pointed
--- --   to by the 'ByteString' to be garbage collected, for example
--- --   if a large string has been read in, and only a small part of it
--- --   is needed in the rest of the program.
--- copy :: ByteString -> ByteString
--- copy cs = foldrChunks (Chunk . S.copy) Empty cs
--- --TODO, we could coalese small blocks here
--- --FIXME: probably not strict enough, if we're doing this to avoid retaining
--- -- the parent blocks then we'd better copy strictly.
---
--- -- ---------------------------------------------------------------------
---
--- -- TODO defrag func that concatenates block together that are below a threshold
--- -- defrag :: ByteString -> ByteString
---
--- -- ---------------------------------------------------------------------
--- -- Lazy ByteString IO
--- --
--- -- Rule for when to close: is it expected to read the whole file?
--- -- If so, close when done.
--- --
---
--- -- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
--- -- are read on demand, in at most @k@-sized chunks. It does not block
--- -- waiting for a whole @k@-sized chunk, so if less than @k@ bytes are
--- -- available then they will be returned immediately as a smaller chunk.
--- --
--- -- The handle is closed on EOF.
--- --
--- -- Note: the 'Handle' should be placed in binary mode with
--- -- 'System.IO.hSetBinaryMode' for 'hGetContentsN' to
--- -- work correctly.
+-- Note: the 'Handle' should be placed in binary mode with
+-- 'System.IO.hSetBinaryMode' for 'hGetContentsN' to
+-- work correctly.
 --
 hGetContentsN :: Int -> Handle -> ByteString IO ()
 hGetContentsN k h = loop -- TODO close on exceptions
@@ -1232,6 +1105,7 @@ hGetN k h n | n > 0 = readChunks n
 hGetN _ _ 0 = Empty ()
 hGetN _ h n = liftIO $ illegalBufferSize h "hGet" n  -- <--- REPAIR !!!
 {-#INLINE hGetN #-}
+
 -- | hGetNonBlockingN is similar to 'hGetContentsN', except that it will never block
 -- waiting for data to become available, instead it returns only whatever data
 -- is available. Chunks are read on demand, in @k@-sized chunks.
@@ -1269,18 +1143,22 @@ hGetContents :: Handle -> ByteString IO ()
 hGetContents = hGetContentsN defaultChunkSize
 {-#INLINE hGetContents #-}
 
+-- | Pipes-style nomenclature for 'hGetContents'
 fromHandle  :: Handle -> ByteString IO ()
 fromHandle = hGetContents
 {-#INLINE fromHandle #-}
 
+-- | Pipes-style nomenclature for 'getContents'
 stdin :: ByteString IO ()
 stdin =  hGetContents IO.stdin
 {-#INLINE stdin #-}
+
 -- | Read @n@ bytes into a 'ByteString', directly from the specified 'Handle'.
 --
 hGet :: Handle -> Int -> ByteString IO ()
 hGet = hGetN defaultChunkSize
 {-#INLINE hGet #-}
+
 -- | hGetNonBlocking is similar to 'hGet', except that it will never block
 -- waiting for data to become available, instead it returns only whatever data
 -- is available.  If there is no data available to be read, 'hGetNonBlocking'
@@ -1292,12 +1170,14 @@ hGet = hGetN defaultChunkSize
 hGetNonBlocking :: Handle -> Int -> ByteString IO ()
 hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 {-#INLINE hGetNonBlocking #-}
--- | Read an entire file /lazily/ into a 'ByteString'.
+
+-- | Read an entire file into a chunked 'ByteString IO ()'.
 -- The Handle will be held open until EOF is encountered.
 --
 readFile :: FilePath -> ByteString IO ()
 readFile f = Go $ liftM hGetContents (openBinaryFile f ReadMode)
 {-#INLINE readFile #-}
+
 -- | Write a 'ByteString' to a file.
 --
 writeFile :: FilePath -> ByteString IO r -> IO r
@@ -1323,18 +1203,14 @@ getContents = hGetContents IO.stdin
 --
 hPut :: Handle -> ByteString IO r -> IO r
 hPut h cs = dematerialize cs return (\x y -> S.hPut h x >> y) (>>= id)
-  -- loop where
-  -- loop b = case b of
-  --   Empty r -> return r
-  --   Chunk bs rest -> S.hPut h bs >> loop rest
-  --   Go m -> m >>= loop
 {-#INLINE hPut #-}
 
--- | Pipes nomenclature for hPut
+-- | Pipes nomenclature for 'hPut'
 toHandle :: Handle -> ByteString IO r -> IO r
 toHandle = hPut
 {-#INLINE toHandle #-}
 
+-- | Pipes-style nomenclature for 'putStr'
 stdout :: ByteString IO r -> IO r
 stdout = hPut IO.stdout
 {-#INLINE stdout#-}

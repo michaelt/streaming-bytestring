@@ -16,6 +16,7 @@ module Data.ByteString.Streaming.Internal (
    , unpackAppendBytesStrict  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
    , yield              --  :: ByteString -> ByteString m ()
+   , unfoldrNE
   ) where
 
 import Prelude hiding
@@ -44,6 +45,7 @@ import GHC.Exts ( SpecConstrAnnotation(..) )
 import Data.String
 import Data.Functor.Identity
 import Data.Word
+import System.IO.Unsafe
 
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
@@ -217,3 +219,17 @@ foldrChunksM step nil bs = dematerialize bs
   step
   join
 {-# INLINE foldrChunksM #-}
+
+unfoldrNE :: Int -> (a -> Either r (Word8, a)) -> a -> (S.ByteString, Either r a)
+unfoldrNE i f x0
+    | i < 0     = (S.empty, Right x0)
+    | otherwise = unsafePerformIO $ S.createAndTrim' i $ \p -> go p x0 0
+  where
+    go !p !x !n
+      | n == i    = return (0, n, Right x)
+      | otherwise = case f x of
+                      Left r     -> return (0, n, Left r)
+                      Right (w,x') -> do poke p w
+                                         go (p `plusPtr` 1) x' (n+1)
+{-# INLINE unfoldrNE #-}
+

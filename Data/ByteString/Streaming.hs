@@ -4,40 +4,38 @@
 -- and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
 
 -- |
--- Module      : Data.ByteString.Lazy
+-- Module      : Data.ByteString.Streaming
 -- Copyright   : (c) Don Stewart 2006
 --               (c) Duncan Coutts 2006-2011
+--               (c) Michael Thompson 2015
 -- License     : BSD-style
 --
--- Maintainer  : dons00@gmail.com, duncan@community.haskell.org
+-- Maintainer  : what_is_it_to_do_anything@yahoo.com
 -- Stability   : stable
 -- Portability : portable
 --
--- A time and space-efficient implementation of lazy byte vectors
--- using lists of packed 'Word8' arrays, suitable for high performance
+-- A time and space-efficient implementation of effectful byte streams
+-- using a stream of packed 'Word8' arrays, suitable for high performance
 -- use, both in terms of large data quantities, or high speed
--- requirements. Lazy ByteStrings are encoded as lazy lists of strict chunks
+-- requirements. Streaming ByteStrings are encoded as streams of strict chunks
 -- of bytes.
 --
--- A key feature of lazy ByteStrings is the means to manipulate large or
+-- A key feature of streaming ByteStrings is the means to manipulate large or
 -- unbounded streams of data without requiring the entire sequence to be
 -- resident in memory. To take advantage of this you have to write your
--- functions in a lazy streaming style, e.g. classic pipeline composition. The
+-- functions in a streaming style, e.g. classic pipeline composition. The
 -- default I\/O chunk size is 32k, which should be good in most circumstances.
 --
 -- Some operations, such as 'concat', 'append', 'reverse' and 'cons', have
 -- better complexity than their "Data.ByteString" equivalents, due to
 -- optimisations resulting from the list spine structure. For other
--- operations lazy ByteStrings are usually within a few percent of
+-- operations streaming, like lazy, ByteStrings are usually within a few percent of
 -- strict ones.
---
--- The recomended way to assemble lazy ByteStrings from smaller parts
--- is to use the builder monoid from "Data.ByteString.Builder".
 --
 -- This module is intended to be imported @qualified@, to avoid name
 -- clashes with "Prelude" functions.  eg.
 --
--- > import qualified Data.ByteString.Lazy as B
+-- > import qualified Data.ByteString.Streaming as B
 --
 -- Original GHC implementation by Bryan O\'Sullivan.
 -- Rewritten to use 'Data.Array.Unboxed.UArray' by Simon Marlow.
@@ -45,71 +43,84 @@
 -- by David Roundy.
 -- Rewritten again and extended by Don Stewart and Duncan Coutts.
 -- Lazy variant by Duncan Coutts and Don Stewart.
+-- Streaming variant by Michael Thompson, following the model of pipes-bytestring
 --
---
-module Data.ByteString.Streaming 
---   (
---   ByteString (..),
---   filter,
---   cycle,
---   iterate,
---   repeat,
---   singleton,
---   pack,
---   empty,
---   unfoldr,
---   map,
--- --  maps,
---   span,
---   split,
---   splitAt,
---   splitWith,
---   take,
---   drop,
---   takeWhile,
---   break,
---   append,
---   concat,
---   concats,
---   cons,
---   stdin,
---   stdout,
---   getContents,
---   hGet,
---   hGetContents,
---   fromHandle,
---   hGetContentsN,
---   hGetN,
---   hGetNonBlocking,
---   hGetNonBlockingN,
---   hPut,
---   toHandle,
---   readFile,
---   writeFile,
---   appendFile,
---   uncons,
---   nextChunk,
---   head,
---   intercalate,
---   intersperse,
---   group,
---   null,
---   zipWithStream,
---   chunk,
---   yield,
---   distributed,
---   fromStrict,
---   toStrict,
---   fromLazy,
---   toLazy,
---   toChunks,
---   fromChunks,
---   hPutNonBlocking,
---   interact,
---   materialize,
---   dematerialize
---   )
-  where
+module Data.ByteString.Streaming (
+
+   -- * The @ByteString@ type
+   ByteString
+   
+   -- * Introducing and eliminating 'ByteString's from other types
+   , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
+   , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
+   , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
+   , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
+   , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
+   , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
+
+
+   , append            -- append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s   
+   , break            -- break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
+   , concat           -- concat :: Monad m => [ByteString m ()] -> ByteString m () 
+   , concats          -- concats :: Monad m => Stream (ByteString m) m r -> ByteString m r 
+   , cons             -- cons :: Monad m => Word8 -> ByteString m r -> ByteString m r 
+   , cons'            -- cons' :: Word8 -> ByteString m r -> ByteString m r 
+   , cycle            -- cycle :: Monad m => ByteString m r -> ByteString m s 
+   , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
+   , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
+   , empty            -- empty :: ByteString m () 
+   , filter           -- filter :: (Word8 -> Bool) -> ByteString m r -> ByteString m r 
+   , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
+   , fold'            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
+   , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
+
+   , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
+   , head             -- head :: Monad m => ByteString m r -> m Word8 
+   , intercalate      -- intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r 
+   , intersperse      -- intersperse :: Monad m => Word8 -> ByteString m r -> ByteString m r 
+   , iterate          -- iterate :: (Word8 -> Word8) -> Word8 -> ByteString m () 
+   , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
+   , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
+   , null             -- null :: Monad m => ByteString m r -> m Bool 
+   , pack             -- pack :: Monad m => [Word8] -> ByteString m () 
+   , repeat           -- repeat :: Word8 -> ByteString m () 
+   , singleton        -- singleton :: Monad m => Word8 -> ByteString m () 
+   , span             -- span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
+   , split            -- split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r 
+   , splitAt          -- splitAt :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m (ByteString m r) 
+   , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
+   , take             -- take :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m () 
+   , takeWhile        -- takeWhile :: (Word8 -> Bool) -> ByteString m r -> ByteString m () 
+
+   , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
+   , unfoldr          -- unfoldr :: (a -> Maybe (Word8, a)) -> a -> ByteString m () 
+   , zipWithStream  -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
+   
+   -- * I\/O with 'ByteString's
+
+   -- ** Standard input and output
+   , getContents      -- getContents :: ByteString IO () 
+   , stdin            -- stdin :: ByteString IO () 
+   , stdout           -- stdout :: ByteString IO r -> IO r 
+   , interact         -- interact :: (ByteString IO () -> ByteString IO r) -> IO r 
+   
+   -- ** Files
+   , readFile         -- readFile :: FilePath -> ByteString IO () 
+   , writeFile        -- writeFile :: FilePath -> ByteString IO r -> IO r 
+   , appendFile       -- appendFile :: FilePath -> ByteString IO r -> IO r 
+   
+   -- ** I\/O with Handles
+   , fromHandle       -- fromHandle :: Handle -> ByteString IO () 
+   , toHandle         -- toHandle :: Handle -> ByteString IO r -> IO r 
+   , hGet             -- hGet :: Handle -> Int -> ByteString IO () 
+   , hGetContents     -- hGetContents :: Handle -> ByteString IO () 
+   , hGetContentsN    -- hGetContentsN :: Int -> Handle -> ByteString IO () 
+   , hGetN            -- hGetN :: Int -> Handle -> Int -> ByteString IO () 
+   , hGetNonBlocking  -- hGetNonBlocking :: Handle -> Int -> ByteString IO () 
+   , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
+   , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
+   , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
+  ) where
 
 import Prelude hiding
     (reverse,head,tail,last,init,null,length,map,lines,foldl,foldr,unlines
@@ -350,24 +361,7 @@ nextChunk (Go m) = m >>= nextChunk
 -- breakSubstring :: S.ByteString -- ^ String to search for
 --                -> ByteString m r-- ^ String to search in
 --                -> ByteString m (ByteString m r) -- ^ Head and tail of string broken at substring
---
--- breakSubstring pat src = search 0 src
---   where
---     search !n !s = case s of
---      Empty r -> Empty (Empty r)
-   --   Chunk c
-        -- | null s             = (src,empty)      -- not found
-        -- | pat `isPrefixOf` s = (take n src,s)
-        -- | otherwise          = search (n+1) (unsafeTail s)
--- -- | /O(1)/ Extract the elements after the head of a ByteString, which must be
--- -- non-empty.
--- tail :: ByteString -> ByteString
--- tail Empty          = errorEmptyStream "tail"
--- tail (Chunk c cs)
---   | S.length c == 1 = cs
---   | otherwise       = Chunk (S.unsafeTail c) cs
--- {-# INLINE tail #-}
---
+
 -- -- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
 -- -- and non-empty.
 -- last :: ByteString -> Word8
@@ -452,19 +446,17 @@ intersperse'' w bs = dematerialize bs
       poke p' w
       S.c_intersperse (p' `plusPtr` 1) (p `plusPtr` o) (fromIntegral l) w
 
--- dematerialize :: Monad m
--- => ByteString m r
--- -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
-
--- -- | The 'transpose' function transposes the rows and columns of its
--- -- 'ByteString' argument.
--- transpose :: [ByteString] -> [ByteString]
--- transpose css = L.map (\ss -> Chunk (S.pack ss) Empty)
---                       (L.transpose (L.map unpack css))
--- --TODO: make this fast
+-- | 'foldr', applied to a binary operator, a starting value
+-- (typically the right-identity of the operator), and a ByteString,
+-- reduces the ByteString using the binary operator, from right to left.
+foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a
+foldr k  = foldrChunks (flip (S.foldr k))
+{-# INLINE foldr #-}
 
 -- -- ---------------------------------------------------------------------
--- -- Reducing 'ByteString's
+-- | 'fold', applied to a binary operator, a starting value (typically
+-- the left-identity of the operator), and a ByteString, reduces the
+-- ByteString using the binary operator, from left to right.
 fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b
 fold step begin done p0 = loop p0 begin
   where
@@ -476,19 +468,7 @@ fold step begin done p0 = loop p0 begin
 
 
 
--- | A strict version of 'foldl'.
--- foldl'           :: forall a b . (b -> a -> b) -> b -> [a] -> b
--- {-# INLINE foldl' #-}
--- foldl' k z0 xs =
---   foldr (\(v::a) (fn::b->b) -> oneShot (\(z::b) -> z `seq` fn (k z v))) (id :: b -> b) xs z0
---   -- See Note [Left folds via right fold]
-fold'x :: Monad m => ByteString m r -> (x -> Word8 -> x) -> x -> (x -> b) -> m (b,r)
-fold'x p0 =
-  dematerialize p0
-  (\r step begin done -> return (done begin, r))
-  (\bs ff step begin done -> ff step (S.foldl' step begin bs) done)
-  (\mf step begin done -> mf >>= \f -> f step begin done)
-
+-- | A fold that keeps the return value of the folded bytestring.
 fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b,r)
 fold' step begin done p0 = loop p0 begin
   where
@@ -497,28 +477,9 @@ fold' step begin done p0 = loop p0 begin
         Go    m    -> m >>= \p' -> loop p' x
         Empty r      -> return (done x,r)
 {-# INLINABLE fold' #-}
--- -- | 'foldl', applied to a binary operator, a starting value (typically
--- -- the left-identity of the operator), and a ByteString, reduces the
--- -- ByteString using the binary operator, from left to right.
--- foldl :: (a -> Word8 -> a) -> a -> ByteString -> a
--- foldl f z = go z
---   where go a Empty        = a
---         go a (Chunk c cs) = go (S.foldl f a c) cs
--- {-# INLINE foldl #-}
+
 --
--- -- | 'foldl\'' is like 'foldl', but strict in the accumulator.
--- foldl' :: (a -> Word8 -> a) -> a -> ByteString -> a
--- foldl' f z = go z
---   where go !a Empty        = a
---         go !a (Chunk c cs) = go (S.foldl' f a c) cs
--- {-# INLINE foldl' #-}
---
--- -- | 'foldr', applied to a binary operator, a starting value
--- -- (typically the right-identity of the operator), and a ByteString,
--- -- reduces the ByteString using the binary operator, from right to left.
-foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a
-foldr k  = foldrChunks (flip (S.foldr k))
-{-# INLINE foldr #-}
+
 -- --
 -- -- | 'foldl1' is a variant of 'foldl' that has no starting value
 -- -- argument, and thus must be applied to non-empty 'ByteStrings'.

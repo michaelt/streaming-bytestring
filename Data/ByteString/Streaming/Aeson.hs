@@ -101,7 +101,6 @@ decoded = consecutively decode
             Right a -> Step (a :> step p2)
             Left  e -> Return (Left (e, p2))
 
--- | Like 'Pipes.next', except it skips leading whitespace and 'B.null' chunks.
   
   nextSkipBlank p0 = do
         x <- nextChunk p0

@@ -1,34 +1,33 @@
--- | Here is an example GET request that streams the response body to standard
+-- | This module, including the documentation, replicates `pipes-http` as
+--   closely as will type-check.
+-- 
+--   Here is an example GET request that streams the response body to standard
 --   output:
 --
--- > import Pipes
--- > import Pipes.HTTP
--- > import qualified Pipes.ByteString as PB  -- from `pipes-bytestring`
+-- > import qualified Data.ByteString.Streaming as S
+-- > import Data.ByteString.Streaming.HTTP
 -- >
 -- > main = do
--- >     req <- parseUrl "https://www.example.com"
--- >     withManager tlsManagerSettings $ \m ->
--- >         withHTTP req m $ \resp ->
--- >             runEffect $ responseBody resp >-> PB.stdout
+-- >   req <- parseUrl "https://www.example.com"
+-- >   m <- newManager tlsManagerSettings 
+-- >   withHTTP req m $ \resp -> S.stdout (responseBody resp) 
+-- > 
 --
 --   Here is an example POST request that also streams the request body from
 --   standard input:
 --
--- > {-# LANGUAGE OverloadedStrings #-}
--- >
--- > import Pipes
--- > import Pipes.HTTP
--- > import qualified Pipes.ByteString as PB
--- >
+-- > {-#LANGUAGE OverloadedStrings #-}
+-- > import qualified Data.ByteString.Streaming as S
+-- > import Data.ByteString.Streaming.HTTP
+-- > 
 -- > main = do
--- >     req <- parseUrl "https://www.example.com"
--- >     let req' = req
--- >             { method = "POST"
--- >             , requestBody = stream PB.stdin
--- >             }
--- >     withManager tlsManagerSettings $ \m ->
--- >         withHTTP req' m $ \resp ->
--- >             runEffect $ responseBody resp >-> PB.stdout
+-- >    req <- parseUrl "https://www.example.com"
+-- >    let req' = req
+-- >            { method = "POST"
+-- >            , requestBody = stream S.stdin
+-- >            }
+-- >    m <- newManager tlsManagerSettings
+-- >    withHTTP req' m $ \resp -> S.stdout (responseBody resp)
 --
 -- For non-streaming request bodies, study the 'RequestBody' type, which also
 -- accepts strict \/ lazy bytestrings or builders.
@@ -40,7 +39,7 @@ module Data.ByteString.Streaming.HTTP (
       module Network.HTTP.Client
     , module Network.HTTP.Client.TLS
 
-    -- * Pipes Interface
+    -- * Streaming Interface
     , withHTTP
     , streamN
     , stream
@@ -58,7 +57,7 @@ import Data.ByteString.Streaming.Internal
 import Control.Monad.Trans
 
 {- $httpclient
-    This module is a thin @pipes@ wrapper around the @http-client@ and
+    This module is a thin @streaming-bytestring@ wrapper around the @http-client@ and
     @http-client-tls@ libraries.
 
     Read the documentation in the "Network.HTTP.Client" module of the
@@ -91,12 +90,12 @@ withHTTP r m k = withResponse r m k'
         k (resp { responseBody = p})
 {-# INLINABLE withHTTP #-}
 
--- | Create a 'RequestBody' from a content length and 'Producer'
+-- | Create a 'RequestBody' from a content length and an effectful 'ByteString'
 streamN :: Int64 -> ByteString IO () -> RequestBody
 streamN n p = RequestBodyStream n (to p)
 {-# INLINABLE streamN #-}
 
-{-| Create a 'RequestBody' from a 'Producer'
+{-| Create a 'RequestBody' from an effectful 'ByteString'
 
     'stream' is more flexible than 'streamN', but requires the server to support
     chunked transfer encoding.

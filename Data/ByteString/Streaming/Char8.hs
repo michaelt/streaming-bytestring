@@ -123,11 +123,12 @@ import qualified Streaming.Internal as Type
 import qualified Streaming.Internal.Folding as F
 
 import qualified Data.ByteString.Streaming as BS
-import Data.ByteString.Streaming
+import Data.ByteString.Streaming.Internal
 
-    (ByteString (..), concats, chunk, distributed,
+import Data.ByteString.Streaming
+    (concats, distributed,
     fromHandle, fromChunks, toChunks, fromStrict, toStrict,
-    empty, null, append, concat, cycle, yield,
+    empty, null, append, concat, cycle, 
     take, drop, splitAt, intercalate, group,
     appendFile, stdout, stdin, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, getContents, hGetNonBlocking,

@@ -49,6 +49,7 @@ import Data.Attoparsec.ByteString
             parse, parseWith, parseTest)
 import Streaming.Internal
 import Data.ByteString.Streaming
+import Data.ByteString.Streaming.Internal
 
 
 -- | The result of a parse.

@@ -54,6 +54,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS
 import Data.ByteString.Streaming
+import Data.ByteString.Streaming.Internal
 import Control.Monad.Trans
 
 {- $httpclient

@@ -18,6 +18,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Data.ByteString.Streaming
                        , Data.ByteString.Streaming.Char8
+                       , Data.ByteString.Streaming.Internal
                        , Data.ByteString.Streaming.Attoparsec
                        , Data.ByteString.Streaming.Aeson
                        , Data.ByteString.Streaming.HTTP

@@ -127,13 +127,13 @@ yield bs = chunk bs (Empty ())
 {-# INLINE yield #-}
 
 
--- | Construct a byte stream from its Church encoding (compare @GHC.Exts.build@)
+-- | Construct a succession of chunks from its Church encoding (compare @GHC.Exts.build@)
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r
 materialize phi = phi Empty Chunk Go
 {-#INLINE materialize #-}
 
--- | Resolve a byte stream into its Church encoding (compare @Data.Stream.foldr@)
+-- | Resolve a succession of chunks into its Church encoding (compare @Data.Stream.foldr@)
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)

@@ -74,8 +74,6 @@ module Data.ByteString.Streaming (
     , head             -- head :: Monad m => ByteString m r -> m Word8 
     , null             -- null :: Monad m => ByteString m r -> m Bool 
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
-    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
-    , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
     , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
 
     -- * Substrings
@@ -138,6 +136,11 @@ module Data.ByteString.Streaming (
     , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
     , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
     , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
+    -- * Etc.
+    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
+    , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
+    , materialize
+    , dematerialize
   ) where
 
 import Prelude hiding

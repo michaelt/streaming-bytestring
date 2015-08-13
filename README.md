@@ -22,25 +22,31 @@ by a monadic step, and the sucession of steps has a 'return' value:
 
 unlike 
 
-   data ByteString = Empty | Chunk {-#UNPACK #-} !S.ByteString ByteString
+    data ByteString = 
+      Empty 
+      | Chunk {-#UNPACK #-} !S.ByteString ByteString
    
 That's it. 
 
+-----
 
-The modules integrating `attoparsec` and `aeson` are simple replicas
-of k0001's `pipes-attoparsec` and `pipes-aeson`. Another module is planned
-that would correspond more closely to `Pipes.Bytestring` than to
-`Data.ByteString.Lazy`. In general the `ByteString m r` type is treated
-as `pipes-bytestring` treats `Producer ByteString m r`. The result
-is much faster, at least with preliminary tests.
+Another module is planned that would correspond more closely to 
+`Pipes.Bytestring` than to `Data.ByteString.Lazy`.   
+`Producer ByteString m r` as it is treated in `pipes-bytestring` as
+the `ByteString m r` type is here. The result is much faster, at least 
+with preliminary tests. The modules integrating `attoparsec` and `aeson` 
+are simple replicas of k0001's `pipes-attoparsec` and `pipes-aeson`. 
+Also included is a replica of `pipes-http`.
 
-It is possibly conceptually clearer than `pipes-bytestring` as well - and 
-clearer than the approach taken by `conduit` and `io-streams`. 
-All of these are forced to integrate the conception of 
-*an amorphous succession of bytes that may be chunked anywhere* - 
+It is possible that `streaming-bytestring` is conceptually clearer than 
+`pipes-bytestring` as well - and clearer than the approach taken by 
+`conduit` and `io-streams`.  All of these are forced to integrate the 
+conception of *an amorphous succession of bytes that may be chunked anywhere* - 
 the direct result of, say, `fromHandle`, `sourceFile` and
 the like - and a succession of 'semantically' distinct bytestrings 
 of interest under a single concept. 
+
+----
 
 Strange as it may seem, it is arguable that the general `Producer`, 
 `Source`, and `InputStream` concepts from these libraries ought not 
@@ -82,15 +88,14 @@ the primitive `lines` concept is just
 
     lines :: ByteString m r -> Stream (ByteString m) m r
 
-this corresponds precisely to 
+as in `pipes-bytestring`; this corresponds precisely to 
 
     lines :: ByteString -> [ByteString]
 
-as it appears in `Data.ByteString.Lazy` -- the elements of the list are 
+as it appears in `Data.ByteString.Lazy` -- the elements of the list (stream) are 
 themselves lazy bytestrings. 
 
-This, of course, is exactly as it is in `pipes-bytestring`. 
-`pipes-bytestring` attempts to *mean* by `Producer ByteString m r` 
+But `pipes-bytestring` attempts to *mean* by `Producer ByteString m r` 
 what we express by `ByteString m r` - the undifferentiated byte stream.
 But (we are provisionally suggesting) that isn't what `Producer ByteString m r` 
 means, and this is part of the reason why `pipes-bytestring` is difficult 
@@ -104,13 +109,13 @@ Here we would instead write a
 
     produceLines :: ByteString m r -> Stream (Of ByteString) m r
 
-or indeed
+which is transparently related to the type of lines itself
 
-    produceLines :: ByteString m r -> Pipes.Producer ByteString m r
+    lines :: ByteString m r -> Stream (ByteString m) m r
 
-Here the types clearly express the transition from the world of 
-amorphously chunked bytestreams to the world of significant individual 
-ByteStrings.  
+The distinctive type of `produceLines` clearly express the transition 
+from the world of amorphously chunked bytestreams to the world of 
+significant individual values, in this case individual strict bytestrings.  
 
 
 

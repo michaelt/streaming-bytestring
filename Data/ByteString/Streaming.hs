@@ -11,7 +11,7 @@
 -- License     : BSD-style
 --
 -- Maintainer  : what_is_it_to_do_anything@yahoo.com
--- Stability   : stable
+-- Stability   : experimental
 -- Portability : portable
 --
 -- A time and space-efficient implementation of effectful byte streams
@@ -675,6 +675,9 @@ unfoldr f s0 = unfoldChunk 32 s0
               | otherwise -> Chunk c (Empty ())
             (c, Just s')  -> Chunk c (unfoldChunk (n*2) s')
 
+-- | 'unfold' is like 'unfoldr' but stops when the co-algebra 
+-- returns 'Left'; the result is the return value of the 'ByteString m r'
+-- 'unfoldr uncons = id'
 unfold :: (a -> Either r (Word8, a)) -> a -> ByteString m r
 unfold f s0 = unfoldChunk 32 s0
   where unfoldChunk n s =

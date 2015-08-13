@@ -43,7 +43,8 @@
 -- by David Roundy.
 -- Rewritten again and extended by Don Stewart and Duncan Coutts.
 -- Lazy variant by Duncan Coutts and Don Stewart.
--- Streaming variant by Michael Thompson, following the model of pipes-bytestring
+-- Streaming variant by Michael Thompson, following the ideas of Gabriel Gonzales'
+-- pipes-bytestring
 --
 module Data.ByteString.Streaming (
     -- * The @ByteString@ type

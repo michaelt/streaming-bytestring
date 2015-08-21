@@ -16,9 +16,10 @@ library
   exposed-modules:     Data.ByteString.Streaming
                        , Data.ByteString.Streaming.Char8
                        , Data.ByteString.Streaming.Internal
-                       , Data.ByteString.Streaming.Attoparsec
                        , Data.ByteString.Streaming.Aeson
                        , Data.ByteString.Streaming.HTTP
+                       , Data.Attoparsec.ByteString.Streaming
+                       
   -- other-modules:       
   other-extensions:    CPP, BangPatterns, ForeignFunctionInterface, DeriveDataTypeable, Unsafe
   build-depends:       base >=4.8 && <4.9

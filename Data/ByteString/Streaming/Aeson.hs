@@ -19,16 +19,17 @@ import qualified Control.Monad.Trans.State.Strict as S
 import           Control.Monad.Trans.State.Strict (StateT(..))
 
 import qualified Data.Aeson                       as Ae
-import qualified Data.Attoparsec.ByteString           as Attoparsec
+import qualified Data.Attoparsec.ByteString       as Attoparsec
 import qualified Data.ByteString                  as S
 import qualified Data.ByteString.Internal         as S (isSpaceWord8)
 import           Data.Data                        (Data, Typeable)
 -- import           Pipes
-import qualified Data.ByteString.Streaming.Attoparsec  as PA
+import qualified Data.Attoparsec.ByteString.Streaming  as PA
 import           Data.ByteString.Streaming 
 import Data.ByteString.Streaming.Internal
 import qualified Data.ByteString.Streaming as B
-import Streaming.Internal
+import Streaming
+import Streaming.Internal (Stream(..))
 
 
 --------------------------------------------------------------------------------
@@ -36,6 +37,7 @@ type Parser m a = forall x . StateT (ByteString m x) m a
 -- | An error while decoding a JSON value.
 
 type ParsingError = ([String],String)
+
 data DecodingError
   = AttoparsecError ParsingError
     -- ^An @attoparsec@ error that happened while parsing the raw JSON string.

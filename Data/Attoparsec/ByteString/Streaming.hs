@@ -2,7 +2,7 @@
 {-# LANGUAGE Trustworthy #-} -- Imports internal modules
 
 -- |
--- Module      :  Data.Attoparsec.ByteString.Lazy
+-- Module      :  Data.Attoparsec.ByteString.Streaming
 -- Copyright   :  Bryan O'Sullivan 2007-2015
 -- License     :  BSD3
 --
@@ -25,7 +25,7 @@
 -- 'B.ByteString' values are still used internally to store parser
 -- input and manipulate it efficiently.
 
-module Data.ByteString.Streaming.Attoparsec
+module Data.Attoparsec.ByteString.Streaming
     (
       parse
       , parsed
@@ -47,7 +47,9 @@ import qualified Data.Attoparsec.Internal.Types as T
 import Data.Attoparsec.ByteString
     hiding (IResult(..), Result, eitherResult, maybeResult,
             parse, parseWith, parseTest)
-import Streaming.Internal
+            
+import Streaming hiding (concats, split, unfold)
+import Streaming.Internal (Stream (..))
 import Data.ByteString.Streaming
 import Data.ByteString.Streaming.Internal
 

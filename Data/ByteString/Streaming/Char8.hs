@@ -166,13 +166,12 @@ import Data.ByteString.Internal (c2w,w2c)
 import qualified Data.ByteString.Unsafe as S
 import qualified Data.ByteString.Char8 as Char8
 
-
-import Streaming.Internal hiding (concats, yield, uncons, concat, append)
-import qualified Streaming.Internal as Type
-import qualified Streaming.Internal.Folding as F
+import Data.ByteString.Streaming.Internal 
+import Streaming hiding (concats, split, unfold)
+import Streaming.Internal (Stream (..))
 
 import qualified Data.ByteString.Streaming as BS
-import Data.ByteString.Streaming (fromLazy, toLazy, nextChunk, )
+import Data.ByteString.Streaming (fromLazy, toLazy, nextChunk)
 import Data.ByteString.Streaming.Internal
 
 import Data.ByteString.Streaming

@@ -193,6 +193,7 @@ import Foreign.Ptr
 -- | /O(n)/ Concatenate a stream of byte streams.
 concat :: Monad m => Stream (ByteString m) m r -> ByteString m r
 concat x = destroy x join Go Empty 
+{-# INLINE concat #-}
 
 -- |  Given a byte stream on a transformed monad, make it possible to \'run\' 
 --    transformer.
@@ -204,10 +205,6 @@ distribute ls = dematerialize ls
              (\bs x -> join $ lift $ Chunk bs (Empty x) )
              (join . hoist (Go . fmap Empty))
 {-# INLINE distribute #-}
--- unpackBytes (Empty r)   = Return r
--- unpackBytes (Chunk c cs) = unpackAppendBytesLazy c (unpackBytes cs)
--- unpackBytes (Go m)       = Delay (liftM unpackBytes m)
-
 
 -- -----------------------------------------------------------------------------
 -- Introducing and eliminating 'ByteString's
@@ -224,7 +221,7 @@ singleton w = Chunk (S.singleton w)  (Empty ())
 
 -- | /O(n)/ Convert a monadic stream separate bytes into a packed byte stream.
 pack :: Monad m => Stream (Of Word8) m r -> ByteString m r
-pack = packBytes'
+pack = packBytes
 {-#INLINE pack #-}
 
 -- | /O(n)/ Converts a packed byte stream into a stream of individual bytes.
@@ -253,7 +250,7 @@ toChunks bs =
 fromStrict :: P.ByteString -> ByteString m ()
 fromStrict bs | S.null bs = Empty ()
               | otherwise = Chunk bs  (Empty ())
-
+{-# INLINE fromStrict #-}
 
 -- |/O(n)/ Convert a monadic byte stream into a single strict 'ByteString'.
 --
@@ -264,6 +261,7 @@ fromStrict bs | S.null bs = Empty ()
 
 toStrict :: Monad m => ByteString m () -> m (S.ByteString)
 toStrict = liftM S.concat . SP.toListM . toChunks
+{-# INLINE toStrict #-}
 
 
 -- |/O(n)/ Convert a monadic byte stream into a single strict 'ByteString',
@@ -273,11 +271,13 @@ toStrict' :: Monad m => ByteString m r -> m (Of S.ByteString r)
 toStrict' bs = do 
   (bss :> r) <- SP.toListM' (toChunks bs)
   return $ (S.concat bss :> r)
+{-# INLINE toStrict' #-}
 
 -- |/O(c)/ Transmute a lazy bytestring to its representation
 -- as a monadic stream of chunks.
 fromLazy :: Monad m => BI.ByteString -> ByteString m ()
 fromLazy = BI.foldrChunks Chunk (Empty ())
+{-# INLINE fromLazy #-}
 
 -- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
 -- with the same internal chunk structure.
@@ -313,7 +313,7 @@ null (Go m)         = m >>= null
 null (Chunk bs rest) = if S.null bs 
   then null rest 
   else return False
-{-# INLINE null #-}
+{-# INLINABLE null #-}
 
 
 -- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
@@ -326,7 +326,7 @@ null' (Chunk bs rest) = if S.null bs
    else do 
      r <- SP.drain $ toChunks rest
      return $! False :> r
-{-# INLINE null' #-}
+{-# INLINABLE null' #-}
 
 
 length :: Monad m => ByteString m r -> m Int
@@ -691,6 +691,7 @@ iterate f = unfoldr (\x -> case f x of !x' -> Just (x', x'))
 --
 repeat :: Word8 -> ByteString m ()
 repeat w = cs where cs = Chunk (S.replicate BI.smallChunkSize w) cs
+{-# INLINABLE repeat #-}
 
 -- -- | /O(n)/ @'replicate' n x@ is a ByteString of length @n@ with @x@
 -- -- the value of every element.
@@ -714,6 +715,7 @@ repeat w = cs where cs = Chunk (S.replicate BI.smallChunkSize w) cs
 cycle :: Monad m => ByteString m r -> ByteString m s
 cycle (Empty _) = error "cycle" -- errorEmptyStream "cycle"
 cycle cs    = cs >> cycle cs -- ' where cs' = foldrChunks Chunk cs' cs
+{-# INLINABLE cycle #-}
 
 -- | /O(n)/ The 'unfoldr' function is analogous to the Stream \'unfoldr\'.
 -- 'unfoldr' builds a ByteString from a seed value.  The function takes
@@ -730,6 +732,7 @@ unfoldr f s0 = unfoldChunk 32 s0
               | S.null c  -> Empty ()
               | otherwise -> Chunk c (Empty ())
             (c, Just s')  -> Chunk c (unfoldChunk (n*2) s')
+{-# INLINABLE unfoldr #-}
 
 -- | 'unfold' is like 'unfoldr' but stops when the co-algebra 
 -- returns 'Left'; the result is the return value of the 'ByteString m r'
@@ -742,7 +745,7 @@ unfold f s0 = unfoldChunk 32 s0
               | S.null c  -> Empty r
               | otherwise -> Chunk c (Empty r)
             (c, Right s') -> Chunk c (unfoldChunk (n*2) s')
-
+{-# INLINABLE unfold #-}
 
 -- ---------------------------------------------------------------------
 -- Substrings
@@ -759,6 +762,7 @@ take i cs0         = take' i cs0
             then Chunk (S.take (fromIntegral n) c) (Empty ())
             else Chunk c (take' (n - fromIntegral (S.length c)) cs)
         take' n (Go m) = Go (liftM (take' n) m)
+{-# INLINABLE take #-}
 
 -- | /O(n\/c)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
 -- elements, or @[]@ if @n > 'length' xs@.
@@ -772,7 +776,9 @@ drop i cs0 = drop' i cs0
             then Chunk (S.drop (fromIntegral n) c) cs
             else drop' (n - fromIntegral (S.length c)) cs
         drop' n (Go m) = Go (liftM (drop' n) m)
-        
+{-# INLINABLE drop #-}
+
+
 -- | /O(n\/c)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Monad m => Int64 -> ByteString m r -> ByteString m (ByteString m r)
 splitAt i cs0 | i <= 0 = Empty cs0
@@ -785,6 +791,7 @@ splitAt i cs0 = splitAt' i cs0
                      Empty (Chunk (S.drop (fromIntegral n) c) cs)
             else Chunk c (splitAt' (n - fromIntegral (S.length c)) cs)
         splitAt' n (Go m) = Go  (liftM (splitAt' n) m)
+{-# INLINABLE splitAt #-}
 
 -- | 'takeWhile', applied to a predicate @p@ and a ByteString @xs@,
 -- returns the longest prefix (possibly empty) of @xs@ of elements that
@@ -797,6 +804,7 @@ takeWhile f cs0 = takeWhile' cs0
             0                  -> Empty ()
             n | n < S.length c -> Chunk (S.take n c) (Empty ())
               | otherwise      -> Chunk c (takeWhile' cs)
+{-# INLINABLE takeWhile #-}
 
 -- -- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
 -- dropWhile :: (Word8 -> Bool) -> ByteString -> ByteString
@@ -818,6 +826,7 @@ break f cs0 = break' cs0
                                       Empty (Chunk (S.drop n c) cs)
               | otherwise      -> Chunk c (break' cs)
         break' (Go m) = Go (liftM break' m)
+{-# INLINABLE break #-}
 
 --
 -- -- TODO
@@ -863,6 +872,7 @@ break f cs0 = break' cs0
 -- equivalent to @('takeWhile' p xs, 'dropWhile' p xs)@
 span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r)
 span p = break (not . p)
+{-# INLINE span #-}
 
 -- | /O(n)/ Splits a 'ByteString' into components delimited by
 -- separators, where the predicate returns True for a separator element.
@@ -888,7 +898,7 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
                                               (s:acc)
 --  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
 
-{-# INLINE splitWith #-}
+{-# INLINABLE splitWith #-}
 
 -- | /O(n)/ Break a 'ByteString' into pieces separated by the byte
 -- argument, consuming the delimiter. I.e.
@@ -919,7 +929,7 @@ split w = loop
   comb acc (s:[]) (Chunk c cs) = comb (s:acc) (S.split w c) cs
   comb acc b (Go m)            = Delay (liftM (comb acc b) m)
   comb acc (s:ss) cs           = Step $ revChunks (s:acc) (comb [] ss cs)
-{-# INLINE split #-}
+{-# INLINABLE split #-}
 
 
 --
@@ -980,7 +990,7 @@ group = go
 intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r
 intercalate s (Return r) = Empty r
 intercalate s (Delay m) = Go $ liftM (intercalate s) m
-intercalate s (Step bsls) = do  -- this isn't quite right yet
+intercalate s (Step bsls) = do  -- this isn't quite right
   ls <- bsls
   s 
   loop ls
@@ -992,16 +1002,22 @@ intercalate s (Step bsls) = do  -- this isn't quite right yet
     case ls of
       Return r -> Empty r  -- no '\n' before end, in this case.
       x -> s >> loop x
+{-# INLINABLE intercalate #-}
 
 
--- -- | count returns the number of times its argument appears in the ByteString
--- --
--- -- > count = length . elemIndices
--- --
--- -- But more efficiently than using length on the intermediate list.
--- count :: Word8 -> ByteString -> Int64
--- count w cs = foldlChunks (\n c -> n + fromIntegral (S.count w c)) 0 cs
+-- | count returns the number of times its argument appears in the ByteString
 --
+-- > count = length . elemIndices
+--
+count :: Monad m => Word8 -> ByteString m r -> m Int
+count w  = liftM (\(n :> r) -> n) . foldlChunks (\n c -> n + fromIntegral (S.count w c)) 0 
+{-# INLINE count #-}
+
+-- But more efficiently than using length on the intermediate list.
+count' :: Monad m => Word8 -> ByteString m r -> m (Of Int r)
+count' w cs = foldlChunks (\n c -> n + fromIntegral (S.count w c)) 0 cs
+{-# INLINE count' #-}
+
 -- -- | The 'findIndex' function takes a predicate and a 'ByteString' and
 -- -- returns the index of the first element in the ByteString
 -- -- satisfying the predicate.
@@ -1048,7 +1064,7 @@ filter p s = go s
         go (Empty r )   = Empty r
         go (Chunk x xs) = chunk (S.filter p x) (go xs) 
                             -- should inspect for null
-{-# INLINE filter #-}
+{-# INLINABLE filter #-}
 
 -- {-
 -- -- | /O(n)/ and /O(n\/c) space/ A first order equivalent of /filter .
@@ -1150,7 +1166,7 @@ hGetContentsN k h = loop -- TODO close on exceptions
         if S.null c
           then Go $ hClose h >> return (Empty ())
           else Chunk c loop
-{-#INLINE hGetContentsN #-} -- very effective inline pragma
+{-#INLINABLE hGetContentsN #-} -- very effective inline pragma
 
 -- | Read @n@ bytes into a 'ByteString', directly from the
 -- specified 'Handle', in chunks of size @k@.
@@ -1166,7 +1182,7 @@ hGetN k h n | n > 0 = readChunks n
 
 hGetN _ _ 0 = Empty ()
 hGetN _ h n = liftIO $ illegalBufferSize h "hGet" n  -- <--- REPAIR !!!
-{-#INLINE hGetN #-}
+{-#INLINABLE hGetN #-}
 
 -- | hGetNonBlockingN is similar to 'hGetContentsN', except that it will never block
 -- waiting for data to become available, instead it returns only whatever data
@@ -1180,9 +1196,9 @@ hGetNonBlockingN k h n | n > 0 = readChunks n
         case S.length c of
             0 -> return (Empty ())
             m -> return (Chunk c (readChunks (i - m)))
-
 hGetNonBlockingN _ _ 0 = Empty ()
 hGetNonBlockingN _ h n = liftIO $ illegalBufferSize h "hGetNonBlocking" n
+{-# INLINABLE hGetNonBlockingN #-}
 
 
 illegalBufferSize :: Handle -> String -> Int -> IO a
@@ -1191,6 +1207,7 @@ illegalBufferSize handle fn sz =
     --TODO: System.IO uses InvalidArgument here, but it's not exported :-(
     where
       msg = fn ++ ": illegal ByteString size " ++ showsPrec 9 sz []
+{-# INLINABLE illegalBufferSize #-}
 
 -- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
 -- are read on demand, using the default chunk size.
@@ -1247,6 +1264,7 @@ writeFile f txt = bracket
     (openBinaryFile f WriteMode)
     hClose
     (\hdl -> hPut hdl txt)
+{-# INLINE writeFile #-}
 
 -- | Append a 'ByteString' to a file.
 --
@@ -1255,11 +1273,13 @@ appendFile f txt = bracket
     (openBinaryFile f AppendMode)
     hClose
     (\hdl -> hPut hdl txt)
+{-# INLINE appendFile #-}
 
 -- | getContents. Equivalent to hGetContents stdin. Will read /lazily/
 --
 getContents :: ByteString IO ()
 getContents = hGetContents IO.stdin
+{-# INLINE getContents #-}
 
 -- | Outputs a 'ByteString' to the specified 'Handle'.
 --
@@ -1287,12 +1307,14 @@ stdout = hPut IO.stdout
 --
 hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r
 hPutNonBlocking _ (Empty r)         = Empty r
+hPutNonBlocking h (Go m) = Go $ liftM (hPutNonBlocking h) m
 hPutNonBlocking h bs@(Chunk c cs) = do
   c' <- lift $ S.hPutNonBlocking h c
   case S.length c' of
     l' | l' == S.length c -> hPutNonBlocking h cs
     0                     -> bs
     _                     -> Chunk c' cs
+{-# INLINABLE hPutNonBlocking #-}
 
 -- | A synonym for @hPut@, for compatibility
 --
@@ -1319,6 +1341,7 @@ hPutNonBlocking h bs@(Chunk c cs) = do
 -- --
 interact :: (ByteString IO () -> ByteString IO r) -> IO r
 interact transformer = stdout (transformer stdin)
+{-# INLINE interact #-}
 
 -- -- ---------------------------------------------------------------------
 -- -- Internal utilities
@@ -1361,7 +1384,7 @@ findIndexOrEnd k (S.PS x s l) =
                                 if k w
                                   then return n
                                   else go (ptr `plusPtr` 1) (n+1)
-{-# INLINE findIndexOrEnd #-}
+{-# INLINABLE findIndexOrEnd #-}
 
 zipWithStream
   :: (Monad m)
@@ -1377,4 +1400,4 @@ zipWithStream op zs = loop zs
       Step fls -> Step $ fmap (loop xs) (op x fls)
       Delay mls -> Delay $ liftM (loop a) mls
 
-{-#INLINE zipWithStream #-}
+{-#INLINABLE zipWithStream #-}

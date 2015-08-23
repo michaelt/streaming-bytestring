@@ -11,13 +11,14 @@ module Data.ByteString.Streaming.Internal (
    , foldlChunks       -- :: Monad m =>  (a -> ByteString -> a) -> a -> ByteString m r -> m a
 
    , foldrChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
-   , packBytes          -- :: Monad m => [GHC.Word.Word8] -> ByteString m ()
+   , foldlChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
+
    , packChars
    , smallChunkSize     -- :: Int
    , unpackAppendBytesLazy  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackAppendBytesStrict  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
-   , packBytes'
+   , packBytes
    , yield              --  :: ByteString -> ByteString m ()
    , unfoldrNE
   ) where
@@ -29,19 +30,17 @@ import Prelude hiding
     ,repeat, cycle, interact, iterate,readFile,writeFile,appendFile,replicate
     ,getContents,getLine,putStr,putStrLn ,zip,zipWith,unzip,notElem)
 import qualified Prelude
-import qualified Data.List              as L  -- L for list/lazy
 import qualified Data.ByteString.Lazy.Internal as BI  -- just for fromChunks etc
 import Control.Monad.Trans
-import Control.Monad.Trans.Class
 import Control.Monad
 
 import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
-import qualified Data.ByteString.Unsafe as S
 
 import Streaming (Of(..))
-import Streaming.Internal hiding (yield, uncons, concat, concats, append, materialize, dematerialize)
-import qualified Streaming.Internal as Type
+import Streaming.Internal hiding (concats, wrap, step)
+import qualified Streaming.Prelude as SP
+
 import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
@@ -77,7 +76,7 @@ instance Monad m => Applicative (ByteString m) where
 instance Monad m => Monad (ByteString m) where
   return = Empty
   {-#INLINE return #-}
-  x >> y = loop SPEC x where
+  x0 >> y = loop SPEC x0 where
     loop !_ x = case x of   -- this seems to be insanely effective
       Empty _ -> y
       Chunk a b -> Chunk a (loop SPEC b)
@@ -88,7 +87,7 @@ instance Monad m => Monad (ByteString m) where
     --   Empty a -> f a
     --   Chunk bs bss -> Chunk bs (bss >>= f)
     --   Go mbss      -> Go (liftM (>>= f) mbss)
-    loop SPEC x where -- unlike >> this SPEC seems pointless 
+    loop SPEC2 x where -- unlike >> this SPEC seems pointless 
       loop !_ y = case y of
         Empty a -> f a
         Chunk bs bss -> Chunk bs (loop SPEC bss)
@@ -106,7 +105,7 @@ instance (r ~ ()) => IsString (ByteString m r) where
   fromString = yield . S.pack . Prelude.map S.c2w
 
 instance (m ~ Identity, Show r) => Show (ByteString m r) where
-  show bs = case bs of
+  show bs0 = case bs0 of
     Empty r -> "Empty (" ++ show r ++ ")"
     Go (Identity bs') -> "Go (Identity (" ++ show bs' ++ "))"
     Chunk bs'' bs -> "Chunk " ++ show bs'' ++ " (" ++ show bs ++ ")"
@@ -120,6 +119,7 @@ instance (Monoid r, Monad m) => Monoid (ByteString m r) where
 
 data SPEC = SPEC | SPEC2
 {-# ANN type SPEC ForceSpecConstr #-}
+
 -- -- ------------------------------------------------------------------------
 --
 -- | Smart constructor for 'Chunk'.
@@ -144,7 +144,7 @@ materialize phi = phi Empty Chunk Go
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
-dematerialize x nil cons wrap = loop SPEC x
+dematerialize x0 nil cons wrap = loop SPEC x0
   where
   loop !_ x = case x of
      Empty r    -> nil r
@@ -181,47 +181,37 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 
 -- ------------------------------------------------------------------------
 -- | Packing and unpacking from lists
-packBytes :: Monad m => [Word8] -> ByteString m ()
-packBytes cs0 =
-    packChunks 32 cs0
-  where
-    packChunks n cs = case S.packUptoLenBytes n cs of
-      (bs, [])  -> Chunk bs (Empty ())
-      (bs, cs') -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
-    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
-    packUptoLenBytes len xs0 =
-        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
-      where
-        go !_ !n []     = return (len-n, [])
-        go !_ !0 xs     = return (len,   xs)
-        go !p !n (x:xs) = poke p x >> go (p `plusPtr` 1) (n-1) xs
-        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
-        createUptoN' l f = do
-            fp <- S.mallocByteString l
-            (l', res) <- withForeignPtr fp $ \p -> f p
-            assert (l' <= l) $ return (S.PS fp 0 l', res)
-{-#INLINABLE packBytes #-}
+-- packBytes' :: Monad m => [Word8] -> ByteString m ()
+-- packBytes' cs0 =
+--     packChunks 32 cs0
+--   where
+--     packChunks n cs = case S.packUptoLenBytes n cs of
+--       (bs, [])  -> Chunk bs (Empty ())
+--       (bs, cs') -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
+--     -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
+--     packUptoLenBytes len xs0 =
+--         unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
+--       where
+--         go !_ !n []     = return (len-n, [])
+--         go !_ !0 xs     = return (len,   xs)
+--         go !p !n (x:xs) = poke p x >> go (p `plusPtr` 1) (n-1) xs
+--         createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
+--         createUptoN' l f = do
+--             fp <- S.mallocByteString l
+--             (l', res) <- withForeignPtr fp $ \p -> f p
+--             assert (l' <= l) $ return (S.PS fp 0 l', res)
+-- {-#INLINABLE packBytes' #-}
 
-packBytes' :: Monad m => Stream (Of Word8) m r -> ByteString m r
-packBytes' cs0 =
-    packChunks 32 cs0
-  where
-    packChunks n cs = case packUptoLenBytes n cs of
-      (bs, Return r)  -> Chunk bs (Empty r)
-      (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
-    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
-    packUptoLenBytes len xs0 =
-        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
-      where
-        go !_ !n (Return r)     = return (len-n, Return r)
-        go !_ !0 xs     = return (len,   xs)
-        go !p !n (Step (x:>xs)) = poke p x >> go (p `plusPtr` 1) (n-1) xs
-        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
-        createUptoN' l f = do
-            fp <- S.mallocByteString l
-            (l', res) <- withForeignPtr fp $ \p -> f p
-            assert (l' <= l) $ return (S.PS fp 0 l', res)
-{-#INLINABLE packBytes' #-}
+packBytes :: Monad m => Stream (Of Word8) m r -> ByteString m r
+packBytes cs0 = do 
+  (bytes :> rest) <- lift $ SP.toListM' $ SP.splitAt 32 cs0
+  case bytes of
+    [] -> case rest of
+      Return r -> Empty r
+      Step as  -> packBytes (Step as)  -- these two pattern matches
+      Delay m -> Go $ liftM packBytes m -- should be evaded.
+    _  -> Chunk (S.packBytes bytes) (packBytes rest)
+{-#INLINABLE packBytes #-}
 
 packChars :: Monad m => Stream (Of Char) m r -> ByteString m r
 packChars cs0 =

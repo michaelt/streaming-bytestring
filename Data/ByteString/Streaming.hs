@@ -59,7 +59,8 @@ module Data.ByteString.Streaming (
     , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
-    , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
+    , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString
+    , toLazy'           -- toLazy :: Monad m => ByteString m () -> m ByteString  
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
 
     -- * Transforming ByteStrings
@@ -76,7 +77,9 @@ module Data.ByteString.Streaming (
     , null             -- null :: Monad m => ByteString m r -> m Bool 
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
     , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
-
+    , chunk
+    , yield
+    
     -- * Substrings
 
     -- ** Breaking strings
@@ -94,8 +97,7 @@ module Data.ByteString.Streaming (
     
     -- ** Special folds
 
-    , concat           -- concat :: Monad m => [ByteString m ()] -> ByteString m () 
-    , concats          -- concats :: Monad m => Stream (ByteString m) m r -> ByteString m r 
+    , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
 
     -- * Building ByteStrings
     
@@ -112,7 +114,14 @@ module Data.ByteString.Streaming (
     , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold'            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
-
+    , length
+    , length'
+    , last
+    , last'
+    , head
+    , head'
+    , null
+    , null'
     -- * I\/O with 'ByteString's
 
     -- ** Standard input and output
@@ -138,10 +147,8 @@ module Data.ByteString.Streaming (
     , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
     , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
     -- * Etc.
-    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
-    , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
-    , materialize
-    , dematerialize
+--    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
+    , distribute       -- distribute :: ByteString (t m) a -> t (ByteString m) a 
   ) where
 
 import Prelude hiding
@@ -156,12 +163,14 @@ import qualified Data.ByteString.Lazy.Internal as BI  -- just for fromChunks etc
 
 import qualified Data.ByteString        as P  (ByteString) -- type name only
 import qualified Data.ByteString        as S  -- S for strict (hmm...)
+import qualified Data.ByteString.Lazy   as BL
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
 import Data.ByteString.Streaming.Internal 
-import Streaming hiding (concats, split, unfold)
+import Streaming hiding (concats, split, unfold, distribute)
 import Streaming.Internal (Stream (..))
+import qualified Streaming.Prelude as SP
 
 import Data.Monoid
 
@@ -181,17 +190,20 @@ import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Storable
 import Foreign.Ptr
 
-concats :: Monad m => Stream (ByteString m) m r -> ByteString m r
-concats x = destroy x join Go Empty 
+-- | /O(n)/ Concatenate a stream of byte streams.
+concat :: Monad m => Stream (ByteString m) m r -> ByteString m r
+concat x = destroy x join Go Empty 
 
-distributed
+-- |  Given a byte stream on a transformed monad, make it possible to \'run\' 
+--    transformer.
+distribute
   :: (Monad m, MonadTrans t, MFunctor t, Monad (t m), Monad (t (ByteString m)))
   => ByteString (t m) a -> t (ByteString m) a
-distributed ls = dematerialize ls
+distribute ls = dematerialize ls
              return
              (\bs x -> join $ lift $ Chunk bs (Empty x) )
              (join . hoist (Go . fmap Empty))
-
+{-# INLINE distribute #-}
 -- unpackBytes (Empty r)   = Return r
 -- unpackBytes (Chunk c cs) = unpackAppendBytesLazy c (unpackBytes cs)
 -- unpackBytes (Go m)       = Delay (liftM unpackBytes m)
@@ -200,125 +212,131 @@ distributed ls = dematerialize ls
 -- -----------------------------------------------------------------------------
 -- Introducing and eliminating 'ByteString's
 
--- | /O(1)/ The empty 'ByteString'
+-- | /O(1)/ The empty 'ByteString' -- i.e. return ()
 empty :: ByteString m ()
 empty = Empty ()
 {-# INLINE empty #-}
 
--- | /O(1)/ Convert a 'Word8' into a 'ByteString'
+-- | /O(1)/ Convert a 'Word8' into a minimal 'ByteString'
 singleton :: Monad m => Word8 -> ByteString m ()
 singleton w = Chunk (S.singleton w)  (Empty ())
 {-# INLINE singleton #-}
 
--- | /O(n)/ Convert a '[Word8]' into a 'ByteString'.
-pack :: Monad m => [Word8] -> ByteString m ()
-pack = packBytes
+-- | /O(n)/ Convert a monadic stream separate bytes into a packed byte stream.
+pack :: Monad m => Stream (Of Word8) m r -> ByteString m r
+pack = packBytes'
 {-#INLINE pack #-}
 
--- | /O(n)/ Converts a 'ByteString' to a '[Word8]'.
--- unpack :: ByteString -> [Word8]
--- unpack = unpackBytes
+-- | /O(n)/ Converts a packed byte stream into a stream of individual bytes.
+unpack ::  Monad m => ByteString m r -> Stream (Of Word8) m r 
+unpack = unpackBytes
 
--- | /O(c)/ Convert a list of strict 'ByteString' into a lazy 'ByteString'
+-- | /O(c)/ Convert a monadic stream of individual strict 'ByteString' 
+-- chunks into a byte stream.
 fromChunks :: Monad m => Stream (Of P.ByteString) m r -> ByteString m r
 fromChunks cs = destroy cs 
   (\(bs :> rest) -> Chunk bs rest)
   Go
   return
+{-#INLINE fromChunks#-}
 
--- -- | /O(c)/ Convert a lazy 'ByteString' into a list of strict 'ByteString'
+-- | /O(c)/ Convert a byte stream into a stream of individual strict bytestrings.
 toChunks :: Monad m => ByteString m r -> Stream (Of P.ByteString) m r
 toChunks bs =
   dematerialize bs
       return
       (\b mx -> Step (b:> mx))
       Delay
-  -- type ByteString_ m r =
-    -- (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
+{-#INLINE toChunks#-}
 
-  -- foldrChunks (\a bs -> liftM (a :) bs) (return [])
-
--- |/O(1)/ Convert a strict 'ByteString' into a lazy 'ByteString'.
+-- |/O(1)/ yield a strict 'ByteString' chunk.
 fromStrict :: P.ByteString -> ByteString m ()
 fromStrict bs | S.null bs = Empty ()
               | otherwise = Chunk bs  (Empty ())
 
--- |/O(n)/ Convert a lazy 'ByteString' into a strict 'ByteString'.
+
+-- |/O(n)/ Convert a monadic byte stream into a single strict 'ByteString'.
 --
--- Note that this is an /expensive/ operation that forces the whole lazy
+-- Note that this is an /expensive/ operation that forces the whole monadic
 -- ByteString into memory and then copies all the data. If possible, try to
--- avoid converting back and forth between strict and lazy bytestrings.
+-- avoid converting back and forth between streaming and lazy bytestrings,
+-- and still more between streaming and strict bytestrings.
 
 toStrict :: Monad m => ByteString m () -> m (S.ByteString)
-toStrict bs = dematerialize bs
-  (\r -> return S.empty)
-  (\bs mbs -> liftM (S.append bs) mbs) -- this is not right, recopies quadratically.
-  join
+toStrict = liftM S.concat . SP.toListM . toChunks
 
--- toStrict' cs0 =
---   do bss <- toChunks cs0
---      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
---      return $ S.unsafeCreate totalLen $ \ptr -> go bss ptr
---   where
---     go []                      !_       = return ()
---     go (S.PS fp off len : cs) !destptr =
---       withForeignPtr fp $ \p -> do
---         S.memcpy destptr (p `plusPtr` off) len
---         go cs (destptr `plusPtr` len)
---
--- toStrict'' :: MonadIO m => ByteString m () -> m (S.ByteString)
--- toStrict'' cs0 =
---   do bss <- toChunks cs0
---      let totalLen = (S.checkedSum "Lazy.toStrict" . L.map S.length) bss
---      liftIO $ S.create totalLen $ \ptr -> go bss ptr
---   where
---     go []                      !_       = return ()
---     go (S.PS fp off len : cs) !destptr =
---       withForeignPtr fp $ \p -> do
---         S.memcpy destptr (p `plusPtr` off) len
---         go cs (destptr `plusPtr` len)
 
+-- |/O(n)/ Convert a monadic byte stream into a single strict 'ByteString',
+-- retaining the return value of the original pair, for use with 'mapsM'
+
+toStrict' :: Monad m => ByteString m r -> m (Of S.ByteString r)
+toStrict' bs = do 
+  (bss :> r) <- SP.toListM' (toChunks bs)
+  return $ (S.concat bss :> r)
+
+-- |/O(c)/ Transmute a lazy bytestring to its representation
+-- as a monadic stream of chunks.
+fromLazy :: Monad m => BI.ByteString -> ByteString m ()
+fromLazy = BI.foldrChunks Chunk (Empty ())
+
+-- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
+-- with the same internal chunk structure.
 toLazy :: Monad m => ByteString m () -> m BI.ByteString
 toLazy bs = dematerialize bs
                 (\() -> return (BI.Empty))
                 (\b mx -> liftM (BI.Chunk b) mx)
                 join
-                      
-fromLazy :: Monad m => BI.ByteString -> ByteString m ()
-fromLazy = BI.foldrChunks Chunk (Empty ())
+{-#INLINE toLazy #-}   
+             
+-- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
+-- with the same invisible chunk structure; retaining the original
+-- return value. 
+toLazy' :: Monad m => ByteString m r -> m (Of BI.ByteString r)
+toLazy' bs = dematerialize bs
+                (\r -> return (BI.Empty :> r))
+                (\b mx -> do 
+                      (bs :> x) <- mx 
+                      return $ BI.Chunk b bs :> x
+                      )
+                join
+{-#INLINE toLazy' #-}                
+    
 
 
--- ------------------------------------------------------------------------
--- --
--- -- {-
--- -- -- | /O(n)/ Convert a '[a]' into a 'ByteString' using some
--- -- -- conversion function
--- -- packWith :: (a -> Word8) -> [a] -> ByteString
--- -- packWith k str = LPS $ L.map (P.packWith k) (chunk defaultChunkSize str)
--- -- {-# INLINE packWith #-}
--- -- {-# SPECIALIZE packWith :: (Char -> Word8) -> [Char] -> ByteString #-}
--- --
--- -- -- | /O(n)/ Converts a 'ByteString' to a '[a]', using a conversion function.
--- -- unpackWith :: (Word8 -> a) -> ByteString -> [a]
--- -- unpackWith k (LPS ss) = L.concatMap (S.unpackWith k) ss
--- -- {-# INLINE unpackWith #-}
--- -- {-# SPECIALIZE unpackWith :: (Word8 -> Char) -> ByteString -> [Char] #-}
--- -- -}
--- --
 -- -- -- ---------------------------------------------------------------------
 -- -- -- Basic interface
 -- --
 -- | /O(1)/ Test whether a ByteString is empty.
 null :: Monad m => ByteString m r -> m Bool
-null (Empty _)  = return True
-null (Go m)     = m >>= null
-null _          = return False
+null (Empty _)      = return True
+null (Go m)         = m >>= null
+null (Chunk bs rest) = if S.null bs 
+  then null rest 
+  else return False
 {-# INLINE null #-}
 
--- | /O(n\/c)/ 'length' returns the length of a ByteString as an 'Int64'
--- length :: Monad m => ByteString m r -> m Int64
--- length cs = foldlChunks (\n c -> n + fromIntegral (S.length c)) 0 cs
--- {-# INLINE length #-}
+
+-- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
+-- this operation must check the whole length of the string.
+null' :: Monad m => ByteString m r -> m (Of Bool r)
+null' (Empty r)  = return $! True :> r
+null' (Go m)     = m >>= null'
+null' (Chunk bs rest) = if S.null bs 
+   then null' rest 
+   else do 
+     r <- SP.drain $ toChunks rest
+     return $! False :> r
+{-# INLINE null' #-}
+
+
+length :: Monad m => ByteString m r -> m Int
+length  = liftM (\(n:>r) -> n) . foldlChunks (\n c -> n + fromIntegral (S.length c)) 0 
+{-# INLINE length #-}
+
+-- | /O(n\/c)/ 'length' returns the length of a byte stream as an 'Int64'
+length' :: Monad m => ByteString m r -> m (Of Int r)
+length' cs = foldlChunks (\n c -> n + fromIntegral (S.length c)) 0 cs
+{-# INLINE length' #-}
 
 -- infixr 5 `cons` -- , `cons'` --same as list (:)
 -- -- nfixl 5 `snoc`
@@ -340,18 +358,21 @@ cons c cs = Chunk (S.singleton c) cs
 -- > let xs = cons\' c xs in xs
 --
 -- You can however use 'cons', as well as 'repeat' and 'cycle', to build
--- infinite lazy ByteStrings.
+-- infinite byte streams.
 --
 cons' :: Word8 -> ByteString m r -> ByteString m r
 cons' w (Chunk c cs) | S.length c < 16 = Chunk (S.cons w c) cs
 cons' w cs                             = Chunk (S.singleton w) cs
 {-# INLINE cons' #-}
 -- --
--- -- | /O(n\/c)/ Append a byte to the end of a 'ByteString'
--- snoc :: ByteString -> Word8 -> ByteString
--- snoc cs w = foldrChunks Chunk (singleton w) cs
--- {-# INLINE snoc #-}
---
+-- | /O(n\/c)/ Append a byte to the end of a 'ByteString'
+snoc :: Monad m => ByteString m r -> Word8 -> ByteString m r
+snoc cs w = do 
+  r <- cs
+  singleton w
+  return r
+{-# INLINE snoc #-}
+
 -- | /O(1)/ Extract the first element of a ByteString, which must be non-empty.
 head :: Monad m => ByteString m r -> m Word8
 head (Empty _)   = error "head"
@@ -359,40 +380,80 @@ head (Chunk c _) = return $ S.unsafeHead c
 head (Go m)      = m >>= head
 {-# INLINE head #-}
 
--- | /O(1)/ Extract the head and tail of a ByteString, returning Nothing
--- if it is empty.
-uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
-uncons (Empty r) = return (Left r)
+-- | /O(c)/ Extract the first element of a ByteString, which must be non-empty.
+head' :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
+head' (Empty r)  = return (Nothing :> r)
+head' (Chunk c rest) = case S.uncons c of 
+  Nothing -> head' rest
+  Just (w,_) -> do
+    r <- SP.drain $ toChunks rest
+    return $! (Just w) :> r
+head' (Go m)      = m >>= head'
+{-# INLINE head' #-}
+
+-- | /O(1)/ Extract the head and tail of a ByteString, or Nothing
+-- if it is empty
+uncons :: Monad m => ByteString m r -> m (Maybe (Word8, ByteString m r))
+uncons (Empty _) = return Nothing
 uncons (Chunk c cs)
-    = return $ Right (S.unsafeHead c
+    = return $ Just (S.unsafeHead c
                      , if S.length c == 1
                          then cs
                          else Chunk (S.unsafeTail c) cs )
 uncons (Go m) = m >>= uncons
-{-# INLINE uncons #-}
+{-# INLINABLE uncons #-}
+--
+-- | /O(1)/ Extract the head and tail of a ByteString, or its return value
+-- if it is empty
+nextByte :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
+nextByte (Empty r) = return (Left r)
+nextByte (Chunk c cs)
+    = if S.null c 
+        then nextByte cs
+        else return $ Right (S.unsafeHead c
+                     , if S.length c == 1
+                         then cs
+                         else Chunk (S.unsafeTail c) cs )
+nextByte (Go m) = m >>= nextByte
+{-# INLINABLE nextByte #-}
+
+unconsChunk :: Monad m => ByteString m r -> m (Maybe (S.ByteString, ByteString m r))
+unconsChunk (Empty _) = return Nothing
+unconsChunk (Chunk c cs) = if S.null c then unconsChunk cs else return $ Just (c,cs)
+unconsChunk (Go m) = m >>= unconsChunk
+{-# INLINABLE unconsChunk #-}
 
 nextChunk :: Monad m => ByteString m r -> m (Either r (S.ByteString, ByteString m r))
 nextChunk (Empty r) = return (Left r)
 nextChunk (Chunk c cs) = if S.null c then nextChunk cs else return $ Right (c,cs)
 nextChunk (Go m) = m >>= nextChunk
-{-# INLINE nextChunk #-}
+{-# INLINABLE nextChunk #-}
 
 
---
---
--- breakSubstring :: S.ByteString -- ^ String to search for
---                -> ByteString m r-- ^ String to search in
---                -> ByteString m (ByteString m r) -- ^ Head and tail of string broken at substring
+-- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
+-- and non-empty.
+last :: Monad m => ByteString m r -> m Word8
+last (Empty r)      = error "Data.ByteString.Streaming.last: empty string"
+last (Go m)         = m >>= last
+last (Chunk c0 cs0) = go c0 cs0
+ where 
+   go c (Empty _)    = if S.null c 
+       then error "Data.ByteString.Streaming.last: empty string"
+       else return $ S.unsafeLast c
+   go _ (Chunk c cs) = go c cs
+   go x (Go m)       = m >>= go x
+{-# INLINABLE last #-}
+ 
+last' :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
+last' (Empty r)      = return (Nothing :> r)
+last' (Go m)         = m >>= last'
+last' (Chunk c0 cs0) = go c0 cs0
+  where 
+    go c (Empty r)    = return $ (Just (S.unsafeLast c) :> r)
+    go _ (Chunk c cs) = go c cs
+    go x (Go m)       = m >>= go x  
+{-# INLINABLE last' #-}
 
--- -- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
--- -- and non-empty.
--- last :: ByteString -> Word8
--- last Empty          = errorEmptyStream "last"
--- last (Chunk c0 cs0) = go c0 cs0
---   where go c Empty        = S.unsafeLast c
---         go _ (Chunk c cs) = go c cs
--- -- XXX Don't inline this. Something breaks with 6.8.2 (haven't investigated yet)
---
 -- -- | /O(n\/c)/ Return all the elements of a 'ByteString' except the last one.
 -- init :: ByteString -> ByteString
 -- init Empty          = errorEmptyStream "init"
@@ -454,23 +515,15 @@ intersperse w (Chunk c cs) = Chunk (S.intersperse w c)
           S.unsafeCreate (2*l) $ \p' -> withForeignPtr fp $ \p -> do
             poke p' w
             S.c_intersperse (p' `plusPtr` 1) (p `plusPtr` o) (fromIntegral l) w
+          
+{-# INLINABLE intersperse #-}
 
-intersperse'' :: Monad m => Word8 -> ByteString m r -> ByteString m r
-intersperse'' w bs = dematerialize bs
-    Empty
-    (\c cs -> Chunk (S.intersperse w c)
-                    (dematerialize cs Empty (Chunk . intersperse') Go))
-    Go
-  where 
-  intersperse' :: P.ByteString -> P.ByteString
-  intersperse' (S.PS fp o l) =
-    S.unsafeCreate (2*l) $ \p' -> withForeignPtr fp $ \p -> do
-      poke p' w
-      S.c_intersperse (p' `plusPtr` 1) (p `plusPtr` o) (fromIntegral l) w
-
--- | 'foldr', applied to a binary operator, a starting value
+{- | 'foldr', applied to a binary operator, a starting value
 -- (typically the right-identity of the operator), and a ByteString,
 -- reduces the ByteString using the binary operator, from right to left.
+
+> foldr cons = id
+-}
 foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a
 foldr k  = foldrChunks (flip (S.foldr k))
 {-# INLINE foldr #-}
@@ -479,6 +532,7 @@ foldr k  = foldrChunks (flip (S.foldr k))
 -- | 'fold', applied to a binary operator, a starting value (typically
 -- the left-identity of the operator), and a ByteString, reduces the
 -- ByteString using the binary operator, from left to right.
+-- We use the style of the foldl libarary for left folds
 fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b
 fold step begin done p0 = loop p0 begin
   where
@@ -489,15 +543,16 @@ fold step begin done p0 = loop p0 begin
 {-# INLINABLE fold #-}
 
 
+-- | 'fold\'' keeps the return value of the left-folded bytestring. Useful for
+--   simultaneous folds over a segmented bytestream
 
--- | A fold that keeps the return value of the folded bytestring.
-fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b,r)
+fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (Of b r)
 fold' step begin done p0 = loop p0 begin
   where
     loop p !x = case p of
         Chunk bs bss -> loop bss $! S.foldl' step x bs
         Go    m    -> m >>= \p' -> loop p' x
-        Empty r      -> return (done x,r)
+        Empty r      -> return (done x :> r)
 {-# INLINABLE fold' #-}
 
 --
@@ -526,14 +581,14 @@ fold' step begin done p0 = loop p0 begin
 -- Special folds
 
 -- | /O(n)/ Concatenate a list of ByteStrings.
-concat :: (Monad m) => [ByteString m ()] -> ByteString m ()
-concat css0 = to css0
-  where
-    go css (Empty m')   = to css
-    go css (Chunk c cs) = Chunk c (go css cs)
-    go css (Go m)       = Go (liftM (go css) m)
-    to []               = Empty ()
-    to (cs:css)         = go css cs
+-- concat :: (Monad m) => [ByteString m ()] -> ByteString m ()
+-- concat css0 = to css0
+--   where
+--     go css (Empty m')   = to css
+--     go css (Chunk c cs) = Chunk c (go css cs)
+--     go css (Go m)       = Go (liftM (go css) m)
+--     to []               = Empty ()
+--     to (cs:css)         = go css cs
 
 
 -- -- | Map a function over a 'ByteString' and concatenate the results

@@ -2,19 +2,22 @@
 {-#LANGUAGE RankNTypes, GADTs #-}
 module Data.ByteString.Streaming.Internal (
    ByteString (..) 
-   , Word8_ (..)
    , chunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
    , chunkOverhead     -- :: Int
    , defaultChunkSize  -- :: Int
    , materialize       -- :: (forall x. (r -> x) -> (ByteString -> x -> x) -> (m x -> x) -> x) -> ByteString m r
    , dematerialize     -- :: Monad m =>  ByteString m r -> forall x.  (r -> x) -> (ByteString -> x -> x) -> (m x -> x) -> x
    , foldrChunks       -- :: Monad m =>  (ByteString -> a -> a) -> a -> ByteString m r -> m a
+   , foldlChunks       -- :: Monad m =>  (a -> ByteString -> a) -> a -> ByteString m r -> m a
+
    , foldrChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
    , packBytes          -- :: Monad m => [GHC.Word.Word8] -> ByteString m ()
+   , packChars
    , smallChunkSize     -- :: Int
    , unpackAppendBytesLazy  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackAppendBytesStrict  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
+   , packBytes'
    , yield              --  :: ByteString -> ByteString m ()
    , unfoldrNE
   ) where
@@ -36,6 +39,7 @@ import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
+import Streaming (Of(..))
 import Streaming.Internal hiding (yield, uncons, concat, concats, append, materialize, dematerialize)
 import qualified Streaming.Internal as Type
 import Foreign.ForeignPtr       (withForeignPtr)
@@ -46,6 +50,7 @@ import Data.String
 import Data.Functor.Identity
 import Data.Word
 import System.IO.Unsafe
+import Control.Exception        (assert)
 
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
@@ -54,10 +59,10 @@ import System.IO.Unsafe
 -- from "Data.ByteString.Streaming.Char8" it can be interpreted as containing
 -- 8-bit characters.
 
-data ByteString m a =
-  Empty a
-  | Chunk {-#UNPACK #-} !S.ByteString (ByteString m a )
-  | Go (m (ByteString m a ))
+data ByteString m r =
+  Empty r
+  | Chunk {-#UNPACK #-} !S.ByteString (ByteString m r )
+  | Go (m (ByteString m r ))
 
 instance Monad m => Functor (ByteString m) where
   fmap f x = case x of
@@ -77,6 +82,7 @@ instance Monad m => Monad (ByteString m) where
       Empty _ -> y
       Chunk a b -> Chunk a (loop SPEC b)
       Go m -> Go (liftM (loop SPEC) m)
+  {-#INLINEABLE (>>)#-}
   x >>= f =
     -- case x of
     --   Empty a -> f a
@@ -87,7 +93,7 @@ instance Monad m => Monad (ByteString m) where
         Empty a -> f a
         Chunk bs bss -> Chunk bs (loop SPEC bss)
         Go mbss      -> Go (liftM (loop SPEC) mbss)
-
+  {-#INLINEABLE (>>=)#-}
 instance MonadIO m => MonadIO (ByteString m) where
   liftIO io = Go (liftM Empty (liftIO io))
   {-#INLINE liftIO #-}
@@ -109,7 +115,8 @@ instance (Monoid r, Monad m) => Monoid (ByteString m r) where
   mempty = Empty mempty
   mappend = liftM2 mappend
       
-data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r
+-- data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r 
+-- This might be preferable to (Of Word8 r), but the present approach is simpler.
 
 data SPEC = SPEC | SPEC2
 {-# ANN type SPEC ForceSpecConstr #-}
@@ -133,7 +140,7 @@ materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) ->
 materialize phi = phi Empty Chunk Go
 {-#INLINE materialize #-}
 
--- | Resolve a succession of chunks into its Church encoding (compare @Data.Stream.foldr@)
+-- | Resolve a succession of chunks into its Church encoding
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
@@ -143,7 +150,7 @@ dematerialize x nil cons wrap = loop SPEC x
      Empty r    -> nil r
      Chunk b bs -> cons b (loop SPEC bs )
      Go ms -> wrap (liftM (loop SPEC) ms)
-{-#INLINE dematerialize #-}
+{-# INLINABLE dematerialize #-}
 ------------------------------------------------------------------------
 
 -- The representation uses lists of packed chunks. When we have to convert from
@@ -161,11 +168,12 @@ dematerialize x nil cons wrap = loop SPEC x
 defaultChunkSize :: Int
 defaultChunkSize = 32 * k - chunkOverhead
    where k = 1024
-
+{-#INLINE defaultChunkSize #-}
 -- | The recommended chunk size. Currently set to 4k, less the memory management overhead
 smallChunkSize :: Int
 smallChunkSize = 4 * k - chunkOverhead
    where k = 1024
+{-#INLINE smallChunkSize #-}
 
 -- | The memory management overhead. Currently this is tuned for GHC only.
 chunkOverhead :: Int
@@ -180,15 +188,71 @@ packBytes cs0 =
     packChunks n cs = case S.packUptoLenBytes n cs of
       (bs, [])  -> Chunk bs (Empty ())
       (bs, cs') -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
+    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
+    packUptoLenBytes len xs0 =
+        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
+      where
+        go !_ !n []     = return (len-n, [])
+        go !_ !0 xs     = return (len,   xs)
+        go !p !n (x:xs) = poke p x >> go (p `plusPtr` 1) (n-1) xs
+        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
+        createUptoN' l f = do
+            fp <- S.mallocByteString l
+            (l', res) <- withForeignPtr fp $ \p -> f p
+            assert (l' <= l) $ return (S.PS fp 0 l', res)
+{-#INLINABLE packBytes #-}
 
-unpackAppendBytesLazy :: S.ByteString -> Stream Word8_ m r -> Stream Word8_ m r
+packBytes' :: Monad m => Stream (Of Word8) m r -> ByteString m r
+packBytes' cs0 =
+    packChunks 32 cs0
+  where
+    packChunks n cs = case packUptoLenBytes n cs of
+      (bs, Return r)  -> Chunk bs (Empty r)
+      (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
+    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
+    packUptoLenBytes len xs0 =
+        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
+      where
+        go !_ !n (Return r)     = return (len-n, Return r)
+        go !_ !0 xs     = return (len,   xs)
+        go !p !n (Step (x:>xs)) = poke p x >> go (p `plusPtr` 1) (n-1) xs
+        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
+        createUptoN' l f = do
+            fp <- S.mallocByteString l
+            (l', res) <- withForeignPtr fp $ \p -> f p
+            assert (l' <= l) $ return (S.PS fp 0 l', res)
+{-#INLINABLE packBytes' #-}
+
+packChars :: Monad m => Stream (Of Char) m r -> ByteString m r
+packChars cs0 =
+    packChunks 32 cs0
+  where
+    packChunks n cs = case packUptoLenBytes n cs of
+      (bs, Return r)  -> Chunk bs (Empty r)
+      (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
+    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
+    packUptoLenBytes len xs0 =
+        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
+      where
+        go !_ !n (Return r) = return (len-n, Return r)
+        go !_ !0 xs         = return (len,   xs)
+        go !p !n (Step (x:>xs)) = poke p (S.c2w x) >> go (p `plusPtr` 1) (n-1) xs
+        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
+        createUptoN' l f = do
+            fp <- S.mallocByteString l
+            (l', res) <- withForeignPtr fp $ \p -> f p
+            assert (l' <= l) $ return (S.PS fp 0 l', res)
+{-#INLINABLE packChars #-}
+
+    
+unpackAppendBytesLazy :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
 unpackAppendBytesLazy (S.PS fp off len) xs
   | len <= 100 = unpackAppendBytesStrict (S.PS fp off len) xs
   | otherwise  = unpackAppendBytesStrict (S.PS fp off 100) remainder
   where
     remainder  = unpackAppendBytesLazy (S.PS fp (off+100) (len-100)) xs
 
-unpackAppendBytesStrict :: S.ByteString -> Stream Word8_ m r -> Stream Word8_ m r
+unpackAppendBytesStrict :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
 unpackAppendBytesStrict (S.PS fp off len) xs =
  S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
       loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
@@ -196,9 +260,9 @@ unpackAppendBytesStrict (S.PS fp off len) xs =
     loop !sentinal !p acc
       | p == sentinal = return acc
       | otherwise     = do x <- peek p
-                           loop sentinal (p `plusPtr` (-1)) (Step (Word8_ x acc))
+                           loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
 
-unpackBytes :: Monad m => ByteString m r ->  Stream Word8_ m r
+unpackBytes :: Monad m => ByteString m r ->  Stream (Of Word8) m r
 unpackBytes bss = dematerialize bss
   Return
   unpackAppendBytesLazy
@@ -211,6 +275,23 @@ foldrChunks step nil bs = dematerialize bs
   (liftM . step)
   join
 {-# INLINE foldrChunks #-}
+
+foldlChunks :: Monad m => (a -> S.ByteString -> a) -> a -> ByteString m r -> m (Of a r)
+foldlChunks f z = go z
+  where go a _ | a `seq` False = undefined
+        go a (Empty r)    = return (a :> r)
+        go a (Chunk c cs) = go (f a c) cs
+        go a (Go m)       = m >>= go a
+{-# INLINABLE foldlChunks #-}
+
+foldlChunksM :: Monad m => (a -> S.ByteString -> m a) -> m a -> ByteString m r -> m (Of a r)
+foldlChunksM f z bs = z >>= \a -> go a bs
+  where 
+    go !a str = case str of 
+      Empty r    -> return (a :> r)
+      Chunk c cs -> f a c >>= \aa -> go aa cs
+      Go m       -> m >>= go a 
+{-# INLINABLE foldlChunksM #-}
 
 -- | Consume the chunks of an effectful ByteString with a natural right monadic fold.
 foldrChunksM :: Monad m => (S.ByteString -> m a -> m a) -> m a -> ByteString m r -> m a

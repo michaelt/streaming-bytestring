@@ -63,6 +63,7 @@ module Data.ByteString.Streaming.Char8 (
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
     , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
+    , toLazy'
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
 
     -- * Transforming ByteStrings
@@ -79,7 +80,9 @@ module Data.ByteString.Streaming.Char8 (
     , null             -- null :: Monad m => ByteString m r -> m Bool 
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r)) 
     , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
-
+    , chunk
+    , yield 
+    
     -- * Substrings
 
     -- ** Breaking strings
@@ -98,8 +101,7 @@ module Data.ByteString.Streaming.Char8 (
     
     -- ** Special folds
 
-    , concat           -- concat :: Monad m => [ByteString m ()] -> ByteString m () 
-    , concats          -- concats :: Monad m => Stream (ByteString m) m r -> ByteString m r 
+    , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
 
     -- * Building ByteStrings
 
@@ -142,8 +144,8 @@ module Data.ByteString.Streaming.Char8 (
     , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
     , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
     -- * Etc.
-    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
-    , distributed      -- distributed :: ByteString (t m) a -> t (ByteString m) a 
+--    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
+    , distribute      -- distribute :: ByteString (t m) a -> t (ByteString m) a 
     , materialize
     , dematerialize
   ) where
@@ -167,22 +169,23 @@ import qualified Data.ByteString.Unsafe as S
 import qualified Data.ByteString.Char8 as Char8
 
 import Data.ByteString.Streaming.Internal 
-import Streaming hiding (concats, split, unfold)
+import Streaming hiding (concats, split, unfold, distribute)
 import Streaming.Internal (Stream (..))
 
 import qualified Data.ByteString.Streaming as BS
-import Data.ByteString.Streaming (fromLazy, toLazy, nextChunk)
+import Data.ByteString.Streaming (fromLazy, toLazy, toLazy', nextChunk)
 import Data.ByteString.Streaming.Internal
 
 import Data.ByteString.Streaming
-    (concats, distributed,
+    (concat, distribute,
     fromHandle, fromChunks, toChunks, fromStrict, toStrict,
-    empty, null, append, concat, cycle, 
+    empty, null, append,  cycle, 
     take, drop, splitAt, intercalate, group,
     appendFile, stdout, stdin, toHandle,
-    hGetContents, hGetContentsN, hGet, hGetN, hPut, getContents, hGetNonBlocking,
+    hGetContents, hGetContentsN, hGet, hGetN, hPut, 
+    getContents, hGetNonBlocking,
     hGetNonBlockingN, readFile, writeFile,
-    hPutNonBlocking, interact, zipWithStream)
+    hPutNonBlocking, interact)
 import Data.Monoid
 
 import Control.Monad            (mplus,liftM, join, ap)
@@ -202,20 +205,20 @@ import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
 import GHC.Exts ( SpecConstrAnnotation(..) )
+import Control.Exception        (assert)
 
-data Char_ r = Char_ {-#UNPACK#-} !Char r
 
 data SPEC = SPEC | SPEC2
 {-# ANN type SPEC ForceSpecConstr #-}
 
-unpackAppendCharsLazy :: S.ByteString -> Stream Char_ m r -> Stream Char_ m r
+unpackAppendCharsLazy :: S.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
 unpackAppendCharsLazy (S.PS fp off len) xs
  | len <= 100 = unpackAppendCharsStrict (S.PS fp off len) xs
  | otherwise  = unpackAppendCharsStrict (S.PS fp off 100) remainder
  where
    remainder  = unpackAppendCharsLazy (S.PS fp (off+100) (len-100)) xs
 
-unpackAppendCharsStrict :: S.ByteString -> Stream Char_ m r -> Stream Char_ m r
+unpackAppendCharsStrict :: S.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
 unpackAppendCharsStrict (S.PS fp off len) xs =
   S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
        loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
@@ -223,29 +226,49 @@ unpackAppendCharsStrict (S.PS fp off len) xs =
      loop !sentinal !p acc
        | p == sentinal = return acc
        | otherwise     = do x <- peek p
-                            loop sentinal (p `plusPtr` (-1)) (Step (Char_ (S.w2c x) acc))
+                            loop sentinal (p `plusPtr` (-1)) (Step (S.w2c x :> acc))
 
 
 
-unpackChars ::  Monad m => ByteString m r ->  Stream Char_ m r
+unpackChars ::  Monad m => ByteString m r ->  Stream (Of Char) m r
 unpackChars (Empty r)    = Return r
 unpackChars (Chunk c cs) = unpackAppendCharsLazy c (unpackChars cs)
 unpackChars (Go m)       = Delay (liftM unpackChars m)
 
-
-packChars :: Monad m => [Char] -> ByteString m ()
-packChars cs0 =
-    packChunks 32 cs0
-  where
-    packChunks n cs = case S.packUptoLenChars n cs of
-      (bs, [])  -> Chunk bs (Empty ())
-      (bs, cs') -> Chunk bs  (packChunks (min (n * 2) BI.smallChunkSize) cs')
-
+--
+-- packChars :: Monad m => [Char] -> ByteString m ()
+-- packChars cs0 =
+--     packChunks 32 cs0
+--   where
+--     packChunks n cs = case S.packUptoLenChars n cs of
+--       (bs, [])  -> Chunk bs (Empty ())
+--       (bs, cs') -> Chunk bs  (packChunks (min (n * 2) BI.smallChunkSize) cs')
+--
 
 -- | /O(n)/ Convert a '[Word8]' into a 'ByteString'.
-pack :: Monad m => [Char] -> ByteString m ()
-pack = packChars
-{-#INLINE pack #-}
+pack :: Monad m => Stream (Of Char) m r -> ByteString m r
+pack = loop where
+  loop stream = case stream of 
+    Return r -> Empty r
+    Delay m -> Go (liftM loop m)
+ --   s -> splitAt 32 s
+    -- packChunks n cs = case packUptoLenBytes n cs of
+    --   (bs, Return r)  -> Chunk bs (Empty r)
+    --   (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
+    -- -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
+    -- packUptoLenBytes len xs0 =
+    --     unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
+    --   where
+    --     go !_ !n (Return r) = return (len-n, Return r)
+    --     go !_ !0 xs         = return (len,   xs)
+    --  --   go !x !n (Delay m)  = m >>= go x n
+    --     go !p !n (Step (x:>xs)) = poke p (S.c2w x) >> go (p `plusPtr` 1) (n-1) xs
+    --     createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
+    --     createUptoN' l f = do
+    --         fp <- S.mallocByteString l
+    --         (l', res) <- withForeignPtr fp $ \p -> f p
+    --         assert (l' <= l) $ return (S.PS fp 0 l', res)
+{-#INLINABLE pack#-}
 
 cons :: Monad m => Char -> ByteString m r -> ByteString m r
 cons c cs = Chunk (S.singleton (c2w c)) cs
@@ -481,7 +504,7 @@ unlines str =  case str of
       Chunk "\n" (Empty r) -> bs 
       _                    -> cons' '\n' bs
   Delay m  -> Go (liftM unlines m)
-{-#INLINE unlines #-}
+{-#INLINABLE unlines #-}
 
 lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
 lines = BS.split 10

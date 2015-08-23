@@ -36,7 +36,6 @@ module Data.Attoparsec.ByteString.Streaming
     )
     where
 
-import Control.DeepSeq (NFData(rnf))
 import qualified Data.ByteString as B
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Except
@@ -48,7 +47,7 @@ import Data.Attoparsec.ByteString
     hiding (IResult(..), Result, eitherResult, maybeResult,
             parse, parseWith, parseTest)
             
-import Streaming hiding (concats, split, unfold)
+import Streaming hiding (concats, unfold)
 import Streaming.Internal (Stream (..))
 import Data.ByteString.Streaming
 import Data.ByteString.Streaming.Internal
@@ -87,7 +86,7 @@ atto_ p = ExceptT $ StateT loop where
   go (T.Done x r) ys            = return $ (Right r, Chunk x ys)
   go (T.Partial k) (Chunk y ys) = go (k y) ys
   go (T.Partial k) (Go m)       = m >>= go (T.Partial k)
-  go (T.Partial k) empty        = go (k B.empty) empty
+  go (T.Partial k) blank        = go (k B.empty) blank
 
 
 parsed

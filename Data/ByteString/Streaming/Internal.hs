@@ -30,7 +30,6 @@ import Prelude hiding
     ,repeat, cycle, interact, iterate,readFile,writeFile,appendFile,replicate
     ,getContents,getLine,putStr,putStrLn ,zip,zipWith,unzip,notElem)
 import qualified Prelude
-import qualified Data.ByteString.Lazy.Internal as BI  -- just for fromChunks etc
 import Control.Monad.Trans
 import Control.Monad
 
@@ -49,7 +48,6 @@ import Data.String
 import Data.Functor.Identity
 import Data.Word
 import System.IO.Unsafe
-import Control.Exception        (assert)
 
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
@@ -214,24 +212,7 @@ packBytes cs0 = do
 {-#INLINABLE packBytes #-}
 
 packChars :: Monad m => Stream (Of Char) m r -> ByteString m r
-packChars cs0 =
-    packChunks 32 cs0
-  where
-    packChunks n cs = case packUptoLenBytes n cs of
-      (bs, Return r)  -> Chunk bs (Empty r)
-      (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
-    -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
-    packUptoLenBytes len xs0 =
-        unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
-      where
-        go !_ !n (Return r) = return (len-n, Return r)
-        go !_ !0 xs         = return (len,   xs)
-        go !p !n (Step (x:>xs)) = poke p (S.c2w x) >> go (p `plusPtr` 1) (n-1) xs
-        createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (S.ByteString, a)
-        createUptoN' l f = do
-            fp <- S.mallocByteString l
-            (l', res) <- withForeignPtr fp $ \p -> f p
-            assert (l' <= l) $ return (S.PS fp 0 l', res)
+packChars = packBytes . SP.map S.c2w
 {-#INLINABLE packChars #-}
 
     

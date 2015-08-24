@@ -3,51 +3,7 @@
 -- This library emulates Data.ByteString.Lazy.Char8 but includes a monadic element
 -- and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
 
--- |
--- Module      : Data.ByteString.Streaming.Char8
--- Copyright   : (c) Don Stewart 2006
---               (c) Duncan Coutts 2006-2011
---               (c) Michael Thompson 2015
--- License     : BSD-style
---
--- Maintainer  : what_is_it_to_do_anything@yahoo.com
--- Stability   : experimental
--- Portability : portable
---
--- A time and space-efficient implementation of lazy byte vectors
--- using lists of packed 'Word8' arrays, suitable for high performance
--- use, both in terms of large data quantities, or high speed
--- requirements. Lazy ByteStrings are encoded as lazy lists of strict chunks
--- of bytes.
---
--- A key feature of lazy ByteStrings is the means to manipulate large or
--- unbounded streams of data without requiring the entire sequence to be
--- resident in memory. To take advantage of this you have to write your
--- functions in a lazy streaming style, e.g. classic pipeline composition. The
--- default I\/O chunk size is 32k, which should be good in most circumstances.
---
--- Some operations, such as 'concat', 'append', 'reverse' and 'cons', have
--- better complexity than their "Data.ByteString" equivalents, due to
--- optimisations resulting from the list spine structure. For other
--- operations lazy ByteStrings are usually within a few percent of
--- strict ones.
---
--- The recomended way to assemble lazy ByteStrings from smaller parts
--- is to use the builder monoid from "Data.ByteString.Builder".
---
--- This module is intended to be imported @qualified@, to avoid name
--- clashes with "Prelude" functions.  eg.
---
--- > import qualified Data.ByteString.Lazy as B
---
--- Original GHC implementation by Bryan O\'Sullivan.
--- Rewritten to use 'Data.Array.Unboxed.UArray' by Simon Marlow.
--- Rewritten to support slices and use 'Foreign.ForeignPtr.ForeignPtr'
--- by David Roundy.
--- Rewritten again and extended by Don Stewart and Duncan Coutts.
--- Lazy variant by Duncan Coutts and Don Stewart.
--- Streaming variant by Michael Thompson, following the model of pipes-bytestring
---
+
 module Data.ByteString.Streaming.Char8 (
     -- * The @ByteString@ type
     ByteString
@@ -55,6 +11,7 @@ module Data.ByteString.Streaming.Char8 (
     -- * Introducing and eliminating 'ByteString's 
     , empty            -- empty :: ByteString m () 
     , pack             -- pack :: Monad m => String -> ByteString m () 
+    , unpack
     , string
     , unlines
     , singleton        -- singleton :: Monad m => Char -> ByteString m () 
@@ -65,6 +22,8 @@ module Data.ByteString.Streaming.Char8 (
     , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
     , toLazy'
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
+    , toStrict'
+
 
     -- * Transforming ByteStrings
     , map              -- map :: Monad m => (Char -> Char) -> ByteString m r -> ByteString m r 
@@ -76,12 +35,22 @@ module Data.ByteString.Streaming.Char8 (
     , cons'            -- cons' :: Char -> ByteString m r -> ByteString m r 
     , append           -- append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s   
     , filter           -- filter :: (Char -> Bool) -> ByteString m r -> ByteString m r 
-    , head             -- head :: Monad m => ByteString m r -> m Word8 
+    , head             -- head :: Monad m => ByteString m r -> m Char
+    , head'            -- head' :: Monad m => ByteString m r -> m (Of Char r)
+    , last             -- last :: Monad m => ByteString m r -> m Char
+    , last'            -- last' :: Monad m => ByteString m r -> m (Of Char r)
     , null             -- null :: Monad m => ByteString m r -> m Bool 
+    , null'            -- null' :: Monad m => ByteString m r -> m (Of Bool r)
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r)) 
+    , nextChar 
+    
+    -- * Direct chunk handling
+    , unconsChunk
     , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
+    , consChunk
     , chunk
-    , yield 
+    , foldrChunks
+    , foldlChunks
     
     -- * Substrings
 
@@ -118,7 +87,10 @@ module Data.ByteString.Streaming.Char8 (
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold'            -- fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
-
+    , length
+    , length'
+    , count
+    , count'
     -- * I\/O with 'ByteString's
 
     -- ** Standard input and output
@@ -126,7 +98,7 @@ module Data.ByteString.Streaming.Char8 (
     , stdin            -- stdin :: ByteString IO () 
     , stdout           -- stdout :: ByteString IO r -> IO r 
     , interact         -- interact :: (ByteString IO () -> ByteString IO r) -> IO r 
-
+    
     -- ** Files
     , readFile         -- readFile :: FilePath -> ByteString IO () 
     , writeFile        -- writeFile :: FilePath -> ByteString IO r -> IO r 
@@ -166,17 +138,18 @@ import qualified Data.ByteString.Char8 as Char8
 
 import Streaming hiding (concats, unfold, distribute)
 import Streaming.Internal (Stream (..))
+import qualified Streaming.Prelude as S
 
 import qualified Data.ByteString.Streaming as SB
-import Data.ByteString.Streaming (fromLazy, toLazy, toLazy', nextChunk)
 import Data.ByteString.Streaming.Internal
 
 import Data.ByteString.Streaming
-    (concat, distribute,
-    fromHandle, fromChunks, toChunks, fromStrict, toStrict,
-    empty, null, append,  cycle, 
+    (fromLazy, toLazy, toLazy', nextChunk, unconsChunk, 
+    fromChunks, toChunks, fromStrict, toStrict, toStrict', 
+    concat, distribute,
+    empty, null, null', length, length', append, cycle, 
     take, drop, splitAt, intercalate, group,
-    appendFile, stdout, stdin, toHandle,
+    appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
     getContents, hGetNonBlocking,
     hGetNonBlockingN, readFile, writeFile,
@@ -193,71 +166,48 @@ import Foreign.Ptr
 import Foreign.Storable
 
 
-unpackAppendCharsLazy :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
-unpackAppendCharsLazy (B.PS fp off len) xs
- | len <= 100 = unpackAppendCharsStrict (B.PS fp off len) xs
- | otherwise  = unpackAppendCharsStrict (B.PS fp off 100) remainder
- where
-   remainder  = unpackAppendCharsLazy (B.PS fp (off+100) (len-100)) xs
-
-unpackAppendCharsStrict :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
-unpackAppendCharsStrict (B.PS fp off len) xs =
-  B.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
-       loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
+unpack ::  Monad m => ByteString m r ->  Stream (Of Char) m r
+unpack bs = case bs of 
+    Empty r -> Return r
+    Go m    -> Delay (liftM unpack m)
+    Chunk c cs -> unpackAppendCharsLazy c (unpack cs)
+  where 
+  unpackAppendCharsLazy :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
+  unpackAppendCharsLazy (B.PS fp off len) xs
+   | len <= 100 = unpackAppendCharsStrict (B.PS fp off len) xs
+   | otherwise  = unpackAppendCharsStrict (B.PS fp off 100) remainder
    where
-     loop !sentinal !p acc
-       | p == sentinal = return acc
-       | otherwise     = do x <- peek p
-                            loop sentinal (p `plusPtr` (-1)) (Step (B.w2c x :> acc))
+     remainder  = unpackAppendCharsLazy (B.PS fp (off+100) (len-100)) xs
 
+  unpackAppendCharsStrict :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
+  unpackAppendCharsStrict (B.PS fp off len) xs =
+    B.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
+         loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
+     where
+       loop !sentinal !p acc
+         | p == sentinal = return acc
+         | otherwise     = do x <- peek p
+                              loop sentinal (p `plusPtr` (-1)) (Step (B.w2c x :> acc))
+{-# INLINABLE unpack#-}
+  
 
-
-unpackChars ::  Monad m => ByteString m r ->  Stream (Of Char) m r
-unpackChars (Empty r)    = Return r
-unpackChars (Chunk c cs) = unpackAppendCharsLazy c (unpackChars cs)
-unpackChars (Go m)       = Delay (liftM unpackChars m)
-
---
--- packChars :: Monad m => [Char] -> ByteString m ()
--- packChars cs0 =
---     packChunks 32 cs0
---   where
---     packChunks n cs = case B.packUptoLenChars n cs of
---       (bs, [])  -> Chunk bs (Empty ())
---       (bs, cs') -> Chunk bs  (packChunks (min (n * 2) BI.smallChunkSize) cs')
---
-
--- | /O(n)/ Convert a '[Word8]' into a 'ByteString'.
+-- | /O(n)/ Convert a stream of separate characters into a packed byte stream.
 pack :: Monad m => Stream (Of Char) m r -> ByteString m r
-pack = loop where
-  loop stream = case stream of 
-    Return r -> Empty r
-    Delay m -> Go (liftM loop m)
- --   s -> splitAt 32 s
-    -- packChunks n cs = case packUptoLenBytes n cs of
-    --   (bs, Return r)  -> Chunk bs (Empty r)
-    --   (bs, cs')       -> Chunk bs (packChunks (min (n * 2) BI.smallChunkSize) cs')
-    -- -- packUptoLenBytes :: Int -> [Word8] -> (ByteString, [Word8])
-    -- packUptoLenBytes len xs0 =
-    --     unsafeDupablePerformIO (createUptoN' len $ \p -> go p len xs0)
-    --   where
-    --     go !_ !n (Return r) = return (len-n, Return r)
-    --     go !_ !0 xs         = return (len,   xs)
-    --  --   go !x !n (Delay m)  = m >>= go x n
-    --     go !p !n (Step (x:>xs)) = poke p (B.c2w x) >> go (p `plusPtr` 1) (n-1) xs
-    --     createUptoN' :: Int -> (Ptr Word8 -> IO (Int, a)) -> IO (B.ByteString, a)
-    --     createUptoN' l f = do
-    --         fp <- B.mallocByteString l
-    --         (l', res) <- withForeignPtr fp $ \p -> f p
-    --         assert (l' <= l) $ return (B.PS fp 0 l', res)
-{-#INLINABLE pack#-}
+pack  = fromChunks 
+        . mapsM (liftM (\(str :> r) -> Char8.pack str :> r) . S.toListM') 
+        . chunksOf 32 
+{-# INLINABLE pack #-}
 
+-- | /O(1)/ Cons a 'Char' onto a byte stream.
 cons :: Monad m => Char -> ByteString m r -> ByteString m r
 cons c = SB.cons (c2w c)
 {-# INLINE cons #-}
 
+-- | /O(1)/ Yield a 'Char' as a minimal 'ByteString'
 singleton :: Monad m => Char -> ByteString m ()
 singleton = SB.singleton . c2w
+{-# INLINE singleton #-}
+
 -- | /O(1)/ Unlike 'cons', 'cons\'' is
 -- strict in the ByteString that we are consing onto. More precisely, it forces
 -- the head and the first chunk. It does this because, for space efficiency, it
@@ -286,6 +236,21 @@ head :: Monad m => ByteString m r -> m Char
 head = liftM (w2c) . SB.head
 {-# INLINE head #-}
 
+-- | /O(1)/ Extract the first element of a ByteString, which may be non-empty
+head' :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
+head' = liftM (\(m:>r) -> fmap w2c m :> r) . SB.head'
+{-# INLINE head' #-}
+
+-- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
+-- and non-empty.
+last :: Monad m => ByteString m r -> m Char
+last = liftM (w2c) . SB.last
+{-# INLINE last #-}
+
+last' :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
+last' = liftM (\(m:>r) -> fmap (w2c) m :> r) . SB.last'
+{-# INLINE last' #-}
+
 -- | /O(1)/ Extract the head and tail of a ByteString, returning Nothing
 -- if it is empty.
 uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))
@@ -296,7 +261,7 @@ uncons (Chunk c cs)
                          then cs
                          else Chunk (B.unsafeTail c) cs )
 uncons (Go m) = m >>= uncons
-{-# INLINE uncons #-}
+{-# INLINABLE uncons #-}
 
 -- ---------------------------------------------------------------------
 -- Transformations
@@ -493,5 +458,31 @@ lines = SB.split 10
 {-#INLINE lines #-}
 
 string :: String -> ByteString m ()
-string = yield . B.pack . Prelude.map B.c2w
+string = chunk . B.pack . Prelude.map B.c2w
+{-# INLINE string #-}
 
+
+count :: Monad m => Char -> ByteString m r -> m Int
+count c = SB.count (c2w c)
+{-# INLINE count #-}
+
+count' :: Monad m => Char -> ByteString m r -> m (Of Int r)
+count' c = SB.count' (c2w c)
+{-# INLINE count' #-}
+
+nextChar :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))
+nextChar b = do 
+  e <- SB.nextByte b
+  case e of 
+    Left r -> return $! Left r
+    Right (w,bs) -> return $! Right (w2c w, bs)
+
+-- , head'
+-- , last
+-- , last'
+-- , length
+-- , length'
+-- , null
+-- , null'
+-- , count
+-- , count'

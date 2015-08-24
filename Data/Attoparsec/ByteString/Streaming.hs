@@ -100,13 +100,13 @@ parsed parser = go
       x <- lift (nextChunk p0)
       case x of
         Left r       -> Return (Right r)
-        Right (bs,p1) -> step (yield bs >>) (A.parse parser bs) p1
+        Right (bs,p1) -> step (chunk bs >>) (A.parse parser bs) p1
     step diffP res p0 = case res of
       A.Fail _ c m -> Return (Left ((c,m), diffP p0))
-      A.Done bs b  -> Step (b :> go (yield bs >> p0))
+      A.Done bs b  -> Step (b :> go (chunk bs >> p0))
       A.Partial k  -> do
         x <- lift (nextChunk p0)
         case x of
           Left e -> step diffP (k mempty) (return e)
-          Right (a,p1) -> step (diffP . (yield a >>)) (k a) p1
+          Right (a,p1) -> step (diffP . (chunk a >>)) (k a) p1
 {-# INLINABLE parsed #-}

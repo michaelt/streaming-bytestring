@@ -2,7 +2,7 @@
 {-#LANGUAGE RankNTypes, GADTs #-}
 module Data.ByteString.Streaming.Internal (
    ByteString (..) 
-   , chunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
+   , consChunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
    , chunkOverhead     -- :: Int
    , defaultChunkSize  -- :: Int
    , materialize       -- :: (forall x. (r -> x) -> (ByteString -> x -> x) -> (m x -> x) -> x) -> ByteString m r
@@ -12,15 +12,16 @@ module Data.ByteString.Streaming.Internal (
 
    , foldrChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
    , foldlChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
-
+   , unfoldMChunks
+   , unfoldrChunks
+   
    , packChars
    , smallChunkSize     -- :: Int
-   , unpackAppendBytesLazy  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
-   , unpackAppendBytesStrict  -- :: ByteString -> Stream Word8_ m r  -> Stream Word8_ m r
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
    , packBytes
-   , yield              --  :: ByteString -> ByteString m ()
+   , chunk             --  :: ByteString -> ByteString m ()
    , unfoldrNE
+   , reread
   ) where
 
 import Prelude hiding
@@ -32,6 +33,7 @@ import Prelude hiding
 import qualified Prelude
 import Control.Monad.Trans
 import Control.Monad
+import Control.Monad.Morph
 
 import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
@@ -90,18 +92,27 @@ instance Monad m => Monad (ByteString m) where
         Empty a -> f a
         Chunk bs bss -> Chunk bs (loop SPEC bss)
         Go mbss      -> Go (liftM (loop SPEC) mbss)
-  {-#INLINEABLE (>>=)#-}
+  {-#INLINEABLE (>>=) #-}
+  
 instance MonadIO m => MonadIO (ByteString m) where
   liftIO io = Go (liftM Empty (liftIO io))
   {-#INLINE liftIO #-}
 
 instance MonadTrans ByteString where
   lift ma = Go $ liftM Empty ma
+  {-#INLINE lift #-}
 
-
+instance MFunctor ByteString where
+  hoist phi bs = case bs of
+    Empty r       -> Empty r
+    Chunk bs rest -> Chunk bs (hoist phi rest)
+    Go m          -> Go (phi (fmap (hoist phi) m))
+  {-#INLINABLE hoist #-}
+  
 instance (r ~ ()) => IsString (ByteString m r) where
-  fromString = yield . S.pack . Prelude.map S.c2w
-
+  fromString = chunk . S.pack . Prelude.map S.c2w
+  {-#INLINE fromString #-}
+  
 instance (m ~ Identity, Show r) => Show (ByteString m r) where
   show bs0 = case bs0 of
     Empty r -> "Empty (" ++ show r ++ ")"
@@ -110,7 +121,9 @@ instance (m ~ Identity, Show r) => Show (ByteString m r) where
     
 instance (Monoid r, Monad m) => Monoid (ByteString m r) where
   mempty = Empty mempty
+  {-#INLINE mempty#-}
   mappend = liftM2 mappend
+  {-#INLINE mappend#-}
       
 -- data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r 
 -- This might be preferable to (Of Word8 r), but the present approach is simpler.
@@ -121,15 +134,16 @@ data SPEC = SPEC | SPEC2
 -- -- ------------------------------------------------------------------------
 --
 -- | Smart constructor for 'Chunk'.
-chunk :: S.ByteString -> ByteString m r -> ByteString m r
-chunk c@(S.PS _ _ len) cs | len == 0  = cs
-                          | otherwise = Chunk c cs
-{-# INLINE chunk #-}
+consChunk :: S.ByteString -> ByteString m r -> ByteString m r
+consChunk c@(S.PS _ _ len) cs 
+  | len == 0  = cs
+  | otherwise = Chunk c cs
+{-# INLINE consChunk #-}
 
 -- | Yield-style mart constructor for 'Chunk'.
-yield :: S.ByteString -> ByteString m ()
-yield bs = chunk bs (Empty ())
-{-# INLINE yield #-}
+chunk :: S.ByteString -> ByteString m ()
+chunk bs = consChunk bs (Empty ())
+{-# INLINE chunk #-}
 
 
 -- | Construct a succession of chunks from its Church encoding (compare @GHC.Exts.build@)
@@ -138,7 +152,8 @@ materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) ->
 materialize phi = phi Empty Chunk Go
 {-#INLINE materialize #-}
 
--- | Resolve a succession of chunks into its Church encoding
+-- | Resolve a succession of chunks into its Church encoding; this is
+-- not a safe operation; it is equivalent to exposing the constructors
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
@@ -176,7 +191,7 @@ smallChunkSize = 4 * k - chunkOverhead
 -- | The memory management overhead. Currently this is tuned for GHC only.
 chunkOverhead :: Int
 chunkOverhead = 2 * sizeOf (undefined :: Int)
-
+{-#INLINE chunkOverhead #-}
 -- ------------------------------------------------------------------------
 -- | Packing and unpacking from lists
 -- packBytes' :: Monad m => [Word8] -> ByteString m ()
@@ -216,28 +231,30 @@ packChars = packBytes . SP.map S.c2w
 {-#INLINABLE packChars #-}
 
     
-unpackAppendBytesLazy :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
-unpackAppendBytesLazy (S.PS fp off len) xs
-  | len <= 100 = unpackAppendBytesStrict (S.PS fp off len) xs
-  | otherwise  = unpackAppendBytesStrict (S.PS fp off 100) remainder
-  where
-    remainder  = unpackAppendBytesLazy (S.PS fp (off+100) (len-100)) xs
-
-unpackAppendBytesStrict :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
-unpackAppendBytesStrict (S.PS fp off len) xs =
- S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
-      loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
-  where
-    loop !sentinal !p acc
-      | p == sentinal = return acc
-      | otherwise     = do x <- peek p
-                           loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
 
 unpackBytes :: Monad m => ByteString m r ->  Stream (Of Word8) m r
 unpackBytes bss = dematerialize bss
-  Return
-  unpackAppendBytesLazy
-  Delay
+    Return
+    unpackAppendBytesLazy
+    Delay
+  where
+  unpackAppendBytesLazy :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
+  unpackAppendBytesLazy (S.PS fp off len) xs
+    | len <= 100 = unpackAppendBytesStrict (S.PS fp off len) xs
+    | otherwise  = unpackAppendBytesStrict (S.PS fp off 100) remainder
+    where
+      remainder  = unpackAppendBytesLazy (S.PS fp (off+100) (len-100)) xs
+
+  unpackAppendBytesStrict :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
+  unpackAppendBytesStrict (S.PS fp off len) xs =
+   S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
+        loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
+    where
+      loop !sentinal !p acc
+        | p == sentinal = return acc
+          | otherwise     = do x <- peek p
+                               loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
+{-# INLINABLE unpackBytes #-}
 
 -- | Consume the chunks of an effectful ByteString with a natural right fold.
 foldrChunks :: Monad m => (S.ByteString -> a -> a) -> a -> ByteString m r -> m a
@@ -285,3 +302,32 @@ unfoldrNE i f x0
                                          go (p `plusPtr` 1) x' (n+1)
 {-# INLINE unfoldrNE #-}
 
+
+unfoldMChunks :: Monad m => (s -> m (Maybe (S.ByteString, s))) -> s -> ByteString m ()
+unfoldMChunks step = loop where
+  loop s = Go $ do
+    m <- step s
+    case m of 
+      Nothing -> return (Empty ())
+      Just (bs,s') -> return $ Chunk bs (loop s')
+{-# INLINABLE unfoldMChunks #-}
+
+unfoldrChunks :: Monad m => (s -> m (Either r (S.ByteString, s))) -> s -> ByteString m r
+unfoldrChunks step = loop where
+  loop !s = Go $ do
+    m <- step s
+    case m of 
+      Left r -> return (Empty r)
+      Right (bs,s') -> return $ Chunk bs (loop s')
+{-# INLINABLE unfoldrChunks #-}
+
+
+
+reread :: Monad m => (s -> m (Maybe S.ByteString)) -> s -> ByteString m ()
+reread step s = loop where 
+  loop = Go $ do 
+    m <- step s
+    case m of 
+      Nothing -> return (Empty ())
+      Just a  -> return (Chunk a loop)
+{-# INLINEABLE reread #-}

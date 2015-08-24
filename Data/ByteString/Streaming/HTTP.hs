@@ -129,5 +129,5 @@ from io = go
     go = do
         bs <- lift io
         unless (B.null bs) $ do
-            yield bs
+            chunk bs
             go 

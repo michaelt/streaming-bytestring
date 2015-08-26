@@ -20,6 +20,7 @@ module Data.ByteString.Streaming.Internal (
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
    , packBytes
    , chunk             --  :: ByteString -> ByteString m ()
+   , wrap 
    , unfoldrNE
    , reread
   ) where
@@ -105,7 +106,7 @@ instance MonadTrans ByteString where
 instance MFunctor ByteString where
   hoist phi bs = case bs of
     Empty r       -> Empty r
-    Chunk bs rest -> Chunk bs (hoist phi rest)
+    Chunk bs' rest -> Chunk bs' (hoist phi rest)
     Go m          -> Go (phi (fmap (hoist phi) m))
   {-#INLINABLE hoist #-}
   
@@ -140,12 +141,16 @@ consChunk c@(S.PS _ _ len) cs
   | otherwise = Chunk c cs
 {-# INLINE consChunk #-}
 
--- | Yield-style mart constructor for 'Chunk'.
+-- | Yield-style smart constructor for 'Chunk'.
 chunk :: S.ByteString -> ByteString m ()
 chunk bs = consChunk bs (Empty ())
 {-# INLINE chunk #-}
 
-
+--
+-- | Smart constructor for 'Go'.
+wrap :: m (ByteString m r) -> ByteString m r
+wrap = Go
+{-# INLINE wrap #-}
 -- | Construct a succession of chunks from its Church encoding (compare @GHC.Exts.build@)
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r

@@ -104,7 +104,7 @@ description:         This is an implementation of effectful, monadic bytestrings
                      .
                      Though we barely alter signatures in @Data.ByteString.Lazy@ 
                      more than is required
-                     by the types, the point of view is very much that of
+                     by the types, the point of view that emerges is very much that of
                      @pipes-bytestring@ and @pipes-group@. In particular
                      we have the correspondences
                      .
@@ -127,10 +127,6 @@ description:         This is an implementation of effectful, monadic bytestrings
                      and the examples in the documentation for the streaming library.
                      .
                     
-                     
-                     
-                     
-                     
 license:             BSD3
 license-file:        LICENSE
 author:              michaelt
@@ -166,4 +162,4 @@ library
                      , http-client-tls
   -- hs-source-dirs:      
   default-language:    Haskell2010
-  ghc-options: -Wall
+  -- ghc-options: -Wall

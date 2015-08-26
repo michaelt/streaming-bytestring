@@ -63,7 +63,8 @@ module Data.ByteString.Streaming (
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
     , toStrict'        -- toStrict' :: Monad m => ByteString m r -> m (Of ByteString r) 
-
+    , drain
+    , wrap
     
     -- * Transforming ByteStrings
     , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
@@ -155,7 +156,7 @@ module Data.ByteString.Streaming (
     , hGetNonBlocking  -- hGetNonBlocking :: Handle -> Int -> ByteString IO () 
     , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
     , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
-    , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
+--    , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
     -- * Etc.
     , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
     , distribute       -- distribute :: ByteString (t m) a -> t (ByteString m) a 
@@ -177,7 +178,7 @@ import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 
 import Data.ByteString.Streaming.Internal 
-import Streaming hiding (concats, unfold, distribute)
+import Streaming hiding (concats, unfold, distribute, wrap)
 import Streaming.Internal (Stream (..))
 import qualified Streaming.Prelude as SP
 
@@ -193,7 +194,7 @@ import Control.Exception        (bracket)
 import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Storable
 import Foreign.Ptr
-
+import Data.Functor.Compose
 -- | /O(n)/ Concatenate a stream of byte streams.
 concat :: Monad m => Stream (ByteString m) m r -> ByteString m r
 concat x = destroy x join Go Empty 
@@ -210,6 +211,13 @@ distribute ls = dematerialize ls
              (join . hoist (Go . fmap Empty))
 {-# INLINE distribute #-}
 
+
+drain :: Monad m => ByteString m r -> m r
+drain bs = case bs of 
+  Empty r      -> return r
+  Go m         -> m >>= drain
+  Chunk _ rest -> drain rest
+{-# INLINABLE drain #-}
 -- -----------------------------------------------------------------------------
 -- Introducing and eliminating 'ByteString's
 
@@ -268,10 +276,14 @@ toStrict = liftM S.concat . SP.toListM . toChunks
 {-# INLINE toStrict #-}
 
 
--- |/O(n)/ Convert a monadic byte stream into a single strict 'ByteString',
--- retaining the return value of the original pair. This operation is
--- for use with 'mapsM'.  It is subject to all the objections one makes 
--- to 'toStrict'. 
+{-| /O(n)/ Convert a monadic byte stream into a single strict 'ByteString',
+   retaining the return value of the original pair. This operation is
+   for use with 'mapsM'.
+
+> mapsM R.toStrict' :: Monad m => Stream (ByteString m) m r -> Stream (Of ByteString) m r 
+ 
+   It is subject to all the objections one makes to 'toStrict'. 
+-}
 toStrict' :: Monad m => ByteString m r -> m (Of S.ByteString r)
 toStrict' bs = do 
   (bss :> r) <- SP.toListM' (toChunks bs)
@@ -335,8 +347,8 @@ null' (Go m)     = m >>= null'
 null' (Chunk bs rest) = if S.null bs 
    then null' rest 
    else do 
-     r <- SP.drain $ toChunks rest
-     return $! False :> r
+     r <- SP.drain (toChunks rest)
+     return (False :> r)
 {-# INLINABLE null' #-}
 
 
@@ -1176,7 +1188,7 @@ filter p s = go s
 -- 'System.IO.hSetBinaryMode' for 'hGetContentsN' to
 -- work correctly.
 --
-hGetContentsN :: Int -> Handle -> ByteString IO ()
+hGetContentsN :: MonadIO m => Int -> Handle -> ByteString m ()
 hGetContentsN k h = loop -- TODO close on exceptions
   where
 --    lazyRead = unsafeInterleaveIO loop
@@ -1184,18 +1196,18 @@ hGetContentsN k h = loop -- TODO close on exceptions
         c <- liftIO (S.hGetSome h k)
         -- only blocks if there is no data available
         if S.null c
-          then Go $ hClose h >> return (Empty ())
+          then Go $ liftIO (hClose h) >> return (Empty ())
           else Chunk c loop
 {-#INLINABLE hGetContentsN #-} -- very effective inline pragma
 
 -- | Read @n@ bytes into a 'ByteString', directly from the
 -- specified 'Handle', in chunks of size @k@.
 --
-hGetN :: Int -> Handle -> Int -> ByteString IO ()
+hGetN :: MonadIO m => Int -> Handle -> Int -> ByteString m ()
 hGetN k h n | n > 0 = readChunks n
   where
     readChunks !i = Go $ do
-        c <- S.hGet h (min k i)
+        c <- liftIO $ S.hGet h (min k i)
         case S.length c of
             0 -> return $ Empty ()
             m -> return $ Chunk c (readChunks (i - m))
@@ -1208,11 +1220,11 @@ hGetN _ h n = liftIO $ illegalBufferSize h "hGet" n  -- <--- REPAIR !!!
 -- waiting for data to become available, instead it returns only whatever data
 -- is available. Chunks are read on demand, in @k@-sized chunks.
 --
-hGetNonBlockingN :: Int -> Handle -> Int ->  ByteString IO ()
+hGetNonBlockingN :: MonadIO m => Int -> Handle -> Int ->  ByteString m ()
 hGetNonBlockingN k h n | n > 0 = readChunks n
   where
     readChunks !i = Go $ do
-        c <- S.hGetNonBlocking h (min k i)
+        c <- liftIO $ S.hGetNonBlocking h (min k i)
         case S.length c of
             0 -> return (Empty ())
             m -> return (Chunk c (readChunks (i - m)))
@@ -1238,23 +1250,23 @@ illegalBufferSize handle fn sz =
 -- 'System.IO.hSetBinaryMode' for 'hGetContents' to
 -- work correctly.
 
-hGetContents :: Handle -> ByteString IO ()
+hGetContents :: MonadIO m => Handle -> ByteString m ()
 hGetContents = hGetContentsN defaultChunkSize
 {-#INLINE hGetContents #-}
 
 -- | Pipes-style nomenclature for 'hGetContents'
-fromHandle  :: Handle -> ByteString IO ()
+fromHandle :: MonadIO m => Handle -> ByteString m ()
 fromHandle = hGetContents
 {-#INLINE fromHandle #-}
 
 -- | Pipes-style nomenclature for 'getContents'
-stdin :: ByteString IO ()
+stdin :: MonadIO m => ByteString m ()
 stdin =  hGetContents IO.stdin
 {-#INLINE stdin #-}
 
 -- | Read @n@ bytes into a 'ByteString', directly from the specified 'Handle'.
 --
-hGet :: Handle -> Int -> ByteString IO ()
+hGet :: MonadIO m => Handle -> Int -> ByteString m ()
 hGet = hGetN defaultChunkSize
 {-#INLINE hGet #-}
 
@@ -1266,15 +1278,15 @@ hGet = hGetN defaultChunkSize
 -- Note: on Windows and with Haskell implementation other than GHC, this
 -- function does not work correctly; it behaves identically to 'hGet'.
 --
-hGetNonBlocking :: Handle -> Int -> ByteString IO ()
+hGetNonBlocking :: MonadIO m => Handle -> Int -> ByteString m ()
 hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 {-#INLINE hGetNonBlocking #-}
 
 -- | Read an entire file into a chunked 'ByteString IO ()'.
 -- The Handle will be held open until EOF is encountered.
 --
-readFile :: FilePath -> ByteString IO ()
-readFile f = Go $ liftM hGetContents (openBinaryFile f ReadMode)
+readFile ::  MonadIO m => FilePath -> ByteString m ()
+readFile f = Go $ liftM hGetContents (liftIO (openBinaryFile f ReadMode))
 {-#INLINE readFile #-}
 
 -- | Write a 'ByteString' to a file.
@@ -1297,23 +1309,23 @@ appendFile f txt = bracket
 
 -- | getContents. Equivalent to hGetContents stdin. Will read /lazily/
 --
-getContents :: ByteString IO ()
+getContents :: MonadIO m => ByteString m ()
 getContents = hGetContents IO.stdin
 {-# INLINE getContents #-}
 
 -- | Outputs a 'ByteString' to the specified 'Handle'.
 --
-hPut :: Handle -> ByteString IO r -> IO r
-hPut h cs = dematerialize cs return (\x y -> S.hPut h x >> y) (>>= id)
+hPut ::  MonadIO m => Handle -> ByteString m r -> m r
+hPut h cs = dematerialize cs return (\x y -> liftIO (S.hPut h x) >> y) (>>= id)
 {-#INLINE hPut #-}
 
 -- | Pipes nomenclature for 'hPut'
-toHandle :: Handle -> ByteString IO r -> IO r
+toHandle :: MonadIO m => Handle -> ByteString m r -> m r
 toHandle = hPut
 {-#INLINE toHandle #-}
 
 -- | Pipes-style nomenclature for 'putStr'
-stdout :: ByteString IO r -> IO r
+stdout ::  MonadIO m => ByteString m r -> m r
 stdout = hPut IO.stdout
 {-#INLINE stdout#-}
 
@@ -1325,16 +1337,16 @@ stdout = hPut IO.stdout
 -- Note: on Windows and with Haskell implementation other than GHC, this
 -- function does not work correctly; it behaves identically to 'hPut'.
 --
-hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r
-hPutNonBlocking _ (Empty r)         = Empty r
-hPutNonBlocking h (Go m) = Go $ liftM (hPutNonBlocking h) m
-hPutNonBlocking h bs@(Chunk c cs) = do
-  c' <- lift $ S.hPutNonBlocking h c
-  case S.length c' of
-    l' | l' == S.length c -> hPutNonBlocking h cs
-    0                     -> bs
-    _                     -> Chunk c' cs
-{-# INLINABLE hPutNonBlocking #-}
+-- hPutNonBlocking ::  MonadIO m => Handle -> ByteString m r -> ByteString m r
+-- hPutNonBlocking _ (Empty r)         = Empty r
+-- hPutNonBlocking h (Go m) = Go $ liftM (hPutNonBlocking h) m
+-- hPutNonBlocking h bs@(Chunk c cs) = do
+--   c' <- lift $ S.hPutNonBlocking h c
+--   case S.length c' of
+--     l' | l' == S.length c -> hPutNonBlocking h cs
+--     0                     -> bs
+--     _                     -> Chunk c' cs
+-- {-# INLINABLE hPutNonBlocking #-}
 
 -- | A synonym for @hPut@, for compatibility
 --

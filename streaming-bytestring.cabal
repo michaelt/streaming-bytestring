@@ -124,7 +124,9 @@ description:         This is an implementation of effectful, monadic bytestrings
                      If you are unfamiliar with this
                      way of structuring material you might take a look at the tutorial for 
                      <http://hackage.haskell.org/package/pipes-group-1.0.2/docs/Pipes-Group-Tutorial.html pipes-group>
-                     and the examples in the documentation for the streaming library.
+                     and the examples in the documentation for the streaming library. See also
+                     <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 these> 
+                     implementations of the shell-like examples from the @io-streams@ tutorial.
                      .
                     
 license:             BSD3

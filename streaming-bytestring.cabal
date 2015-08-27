@@ -160,14 +160,16 @@ library
   -- other-modules:       
   other-extensions:    CPP, BangPatterns, ForeignFunctionInterface, DeriveDataTypeable, Unsafe
   build-depends:       base >=4.7 && <4.9
-                     , bytestring
+                     , bytestring >=0.10 && <0.11
                      , deepseq 
+                     , syb
                      , mtl
                      , mmorph
                      , transformers
                      , streaming
                      , attoparsec
                      , http-client 
+                     , http-client-tls
   -- hs-source-dirs:      
   default-language:    Haskell2010
   -- ghc-options: -Wall

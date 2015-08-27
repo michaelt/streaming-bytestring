@@ -24,6 +24,7 @@ module Data.ByteString.Streaming.Internal (
    , wrap 
    , unfoldrNE
    , reread
+   , inlinePerformIO
   ) where
 
 import Prelude hiding
@@ -258,7 +259,7 @@ unpackBytes bss = dematerialize bss
 
   unpackAppendBytesStrict :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
   unpackAppendBytesStrict (S.PS fp off len) xs =
-   accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
+   inlinePerformIO $ withForeignPtr fp $ \base -> do
         loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
     where
       accursedUnutterablePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
@@ -267,6 +268,9 @@ unpackBytes bss = dematerialize bss
           | otherwise     = do x <- peek p
                                loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
 {-# INLINABLE unpackBytes #-}
+
+inlinePerformIO :: IO a -> a
+inlinePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
 
 -- | Consume the chunks of an effectful ByteString with a natural right fold.
 foldrChunks :: Monad m => (S.ByteString -> a -> a) -> a -> ByteString m r -> m a

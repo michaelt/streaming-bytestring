@@ -195,7 +195,7 @@ unpack bs = case bs of
 
   unpackAppendCharsStrict :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
   unpackAppendCharsStrict (B.PS fp off len) xs =
-    B.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
+    inlinePerformIO $ withForeignPtr fp $ \base -> do
          loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
      where
        loop !sentinal !p acc

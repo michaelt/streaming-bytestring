@@ -1497,7 +1497,7 @@ revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
 -- of the string if no element is found, rather than Nothing.
 findIndexOrEnd :: (Word8 -> Bool) -> P.ByteString -> Int
 findIndexOrEnd k (S.PS x s l) =
-    S.accursedUnutterablePerformIO $
+    inlinePerformIO $
       withForeignPtr x $ \f -> go (f `plusPtr` s) 0
   where
     go !ptr !n | n >= l    = return l

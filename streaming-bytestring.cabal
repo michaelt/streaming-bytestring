@@ -1,9 +1,9 @@
 name:                streaming-bytestring
-version:             0.1.0.1
-synopsis:            Lazy bytestring done right
-description:         This is an implementation of effectful memory-constrained 
-                     bytestrings, or byte streams, and streaming bytestring manipulation, 
-                     adequate for non-lazy-io. 
+version:             0.1.0.2
+synopsis:            effectful bytestrings, or: lazy bytestring done right
+description:         This is an implementation of effectful, memory-constrained 
+                     bytestrings (byte streams) and functions for streaming 
+                     bytestring manipulation, adequate for non-lazy-io. 
                      .
                      Interoperation with @pipes@ uses this isomorphism:
                      . 

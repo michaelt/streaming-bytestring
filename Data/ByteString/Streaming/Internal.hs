@@ -34,6 +34,7 @@ import Prelude hiding
 import qualified Prelude
 import Control.Monad.Trans
 import Control.Monad
+import Control.Applicative
 import Control.Monad.Morph
 
 import qualified Data.ByteString        as S  -- S for strict (hmm...)

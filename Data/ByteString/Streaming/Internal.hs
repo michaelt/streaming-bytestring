@@ -36,6 +36,7 @@ import Control.Monad.Trans
 import Control.Monad
 import Control.Applicative
 import Control.Monad.Morph
+import Data.Monoid (Monoid(..))
 
 import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
@@ -49,6 +50,7 @@ import Foreign.Ptr
 import Foreign.Storable
 import GHC.Exts ( SpecConstrAnnotation(..) )
 import Data.String
+
 import Data.Functor.Identity
 import Data.Word
 import System.IO.Unsafe

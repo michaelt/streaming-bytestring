@@ -104,7 +104,7 @@ instance Monad m => Monad (ByteString m) where
 instance MonadIO m => MonadIO (ByteString m) where
   liftIO io = Go (liftM Empty (liftIO io))
   {-#INLINE liftIO #-}
-blank_layer
+
 instance MonadTrans ByteString where
   lift ma = Go $ liftM Empty ma
   {-#INLINE lift #-}

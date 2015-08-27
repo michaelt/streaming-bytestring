@@ -104,7 +104,7 @@ instance Monad m => Monad (ByteString m) where
 instance MonadIO m => MonadIO (ByteString m) where
   liftIO io = Go (liftM Empty (liftIO io))
   {-#INLINE liftIO #-}
-
+blank_layer
 instance MonadTrans ByteString where
   lift ma = Go $ liftM Empty ma
   {-#INLINE lift #-}
@@ -113,7 +113,7 @@ instance MFunctor ByteString where
   hoist phi bs = case bs of
     Empty r       -> Empty r
     Chunk bs' rest -> Chunk bs' (hoist phi rest)
-    Go m          -> Go (phi (fmap (hoist phi) m))
+    Go m          -> Go (phi (liftM (hoist phi) m))
   {-#INLINABLE hoist #-}
   
 instance (r ~ ()) => IsString (ByteString m r) where

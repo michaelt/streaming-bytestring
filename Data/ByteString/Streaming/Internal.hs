@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP, BangPatterns #-}
 {-#LANGUAGE RankNTypes, GADTs #-}
+{-# LANGUAGE UnliftedFFITypes, MagicHash, UnboxedTuples #-}
 module Data.ByteString.Streaming.Internal (
    ByteString (..) 
    , consChunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
@@ -54,6 +55,8 @@ import Data.String
 import Data.Functor.Identity
 import Data.Word
 import System.IO.Unsafe
+import GHC.Base                 (realWorld#,unsafeChr)
+import GHC.IO                   (IO(IO))
 
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
@@ -125,9 +128,9 @@ instance (m ~ Identity, Show r) => Show (ByteString m r) where
     
 instance (Monoid r, Monad m) => Monoid (ByteString m r) where
   mempty = Empty mempty
-  {-#INLINE mempty#-}
+  {-# INLINE mempty #-}
   mappend = liftM2 mappend
-  {-#INLINE mappend#-}
+  {-# INLINE mappend #-}
       
 -- data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r 
 -- This might be preferable to (Of Word8 r), but the present approach is simpler.
@@ -255,9 +258,10 @@ unpackBytes bss = dematerialize bss
 
   unpackAppendBytesStrict :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
   unpackAppendBytesStrict (S.PS fp off len) xs =
-   S.accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
+   accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> do
         loop (base `plusPtr` (off-1)) (base `plusPtr` (off-1+len)) xs
     where
+      accursedUnutterablePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
       loop !sentinal !p acc
         | p == sentinal = return acc
           | otherwise     = do x <- peek p

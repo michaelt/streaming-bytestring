@@ -208,7 +208,7 @@ distribute
 distribute ls = dematerialize ls
              return
              (\bs x -> join $ lift $ Chunk bs (Empty x) )
-             (join . hoist (Go . fmap Empty))
+             (join . hoist (Go . liftM Empty))
 {-# INLINE distribute #-}
 
 

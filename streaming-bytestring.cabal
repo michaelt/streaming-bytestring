@@ -131,13 +131,7 @@ description:         This is an implementation of effectful memory-constrained
                      and the examples in the documentation for the streaming library. See also
                      <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 simple implementations> 
                      of the shell-like examples mentioned above.
-                     .
-                     The modules for applying attoparsec parsers and making http clients should
-                     properly be in separate packages, but are included for the moment
-                     to simplify experimentation. They simply replicate the corresponding pipes
-                     modules. Those modules don't involve pipes, but only the 
-                     @Producer ByteString m r@ type, which pipes globally reserves 
-                     to mean exactly what is here called @ByteString m r@.
+
                     
 license:             BSD3
 license-file:        LICENSE

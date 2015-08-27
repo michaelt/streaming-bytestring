@@ -290,14 +290,28 @@ toStrict' bs = do
   return $ (S.concat bss :> r)
 {-# INLINE toStrict' #-}
 
--- |/O(c)/ Transmute a lazy bytestring to its representation
--- as a monadic stream of chunks.
+{- |/O(c)/ Transmute a lazy bytestring to its representation
+    as a monadic stream of chunks.
+
+>>> Q.putStrLn $ Q.fromLazy "hi"
+hi
+>>>  Q.fromLazy "hi"
+Chunk "hi" (Empty (()))  -- note: a 'show' instance works in the identity monad
+>>>  Q.fromLazy $ BL.fromChunks ["here", "are", "some", "chunks"]
+Chunk "here" (Chunk "are" (Chunk "some" (Chunk "chunks" (Empty (())))))
+
+-}
 fromLazy :: Monad m => BI.ByteString -> ByteString m ()
 fromLazy = BI.foldrChunks Chunk (Empty ())
 {-# INLINE fromLazy #-}
 
--- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
--- with the same internal chunk structure.
+{- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
+    with the same internal chunk structure.
+
+>>> Q.toLazy "hello"
+"hello"
+
+-}
 toLazy :: Monad m => ByteString m () -> m BI.ByteString
 toLazy bs = dematerialize bs
                 (\() -> return (BI.Empty))
@@ -305,9 +319,16 @@ toLazy bs = dematerialize bs
                 join
 {-#INLINE toLazy #-}   
 
--- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
--- with the same invisible chunk structure, retaining the original
--- return value. 
+{- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
+    with the same invisible chunk structure, retaining the original
+    return value. 
+
+>>> Q.toLazy' "hello"
+"hello" :> ()
+>>> S.toListM $ mapsM Q.toLazy' $ Q.lines $ "one\ntwo\three\nfour\nfive\n"
+["one","two\three","four","five",""]
+
+-}
 toLazy' :: Monad m => ByteString m r -> m (Of BI.ByteString r)
 toLazy' bs0 = dematerialize bs0
                 (\r -> return (BI.Empty :> r))
@@ -323,7 +344,15 @@ toLazy' bs0 = dematerialize bs0
 -- ---------------------------------------------------------------------
 -- Basic interface
 --
--- | /O(1)/ Test whether a ByteString is empty.
+{-| /O(1)/ Test whether a ByteString is empty. The value is of course in the base monad.
+
+>>>  Q.null "one\ntwo\three\nfour\nfive\n"
+False
+>>> Q.null $ Q.take 0 Q.stdin
+True
+>>> :t Q.null $ Q.take 0 Q.stdin
+Q.null $ Q.take 0 Q.stdin :: MonadIO m => m Bool
+-}
 null :: Monad m => ByteString m r -> m Bool
 null (Empty _)      = return True
 null (Go m)         = m >>= null
@@ -334,8 +363,13 @@ null (Chunk bs rest) = if S.null bs
 
 
 {- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
--- this operation must check the whole length of the string.
+-- to reach the return value, this operation must check the whole length of the string.
 
+>>> Q.null' "one\ntwo\three\nfour\nfive\n"
+False :> ()
+[*Main]
+>>> Q.null' ""
+True :> ()
 >>> S.print $ mapsM R.null' $ Q.lines "yours,\nMeredith"
 False
 False
@@ -356,7 +390,16 @@ length :: Monad m => ByteString m r -> m Int
 length  = liftM (\(n:> _) -> n) . foldlChunks (\n c -> n + fromIntegral (S.length c)) 0 
 {-# INLINE length #-}
 
--- | /O(n\/c)/ 'length' returns the length of a byte stream as an 'Int64'
+{-| /O(n\/c)/ 'length'' returns the length of a byte stream as an 'Int'
+    together with the return value. This makes various maps possible
+
+>>> Q.length' "one\ntwo\three\nfour\nfive\n"
+23 :> ()
+>>> S.print $ S.take 3 $ mapsM Q.length' $ Q.lines "one\ntwo\three\nfour\nfive\n" 
+3
+8
+4
+-}
 length' :: Monad m => ByteString m r -> m (Of Int r)
 length' cs = foldlChunks (\n c -> n + fromIntegral (S.length c)) 0 cs
 {-# INLINE length' #-}
@@ -703,18 +746,29 @@ fold' step0 begin done p0 = loop p0 begin
 -- ---------------------------------------------------------------------
 -- Unfolds and replicates
 
--- | @'iterate' f x@ returns an infinite ByteString of repeated applications
+{-| @'iterate' f x@ returns an infinite ByteString of repeated applications
 -- of @f@ to @x@:
 
--- > iterate f x == [x, f x, f (f x), ...]
+> iterate f x == [x, f x, f (f x), ...]
 
+>>> R.stdout $ R.take 50 $ R.iterate succ 39
+()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXY>>> 
+>>> Q.putStrLn $ Q.take 50 $ Q.iterate succ '\''
+()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXY
+
+-}
 iterate :: (Word8 -> Word8) -> Word8 -> ByteString m r
 iterate f = unfoldr (\x -> case f x of !x' -> Right (x', x'))
 {-# INLINABLE iterate #-}
 
--- | @'repeat' x@ is an infinite ByteString, with @x@ the value of every
--- element.
---
+{- | @'repeat' x@ is an infinite ByteString, with @x@ the value of every
+     element.
+
+>>> R.stdout $ R.take 50 $ R.repeat 60
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>> 
+>>> Q.putStrLn $ Q.take 50 $ Q.repeat 'z'
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+-}
 repeat :: Word8 -> ByteString m r
 repeat w = cs where cs = Chunk (S.replicate BI.smallChunkSize w) cs
 {-# INLINABLE repeat #-}
@@ -735,13 +789,19 @@ repeat w = cs where cs = Chunk (S.replicate BI.smallChunkSize w) cs
 --     nChunks 0 = Empty
 --     nChunks m = Chunk c (nChunks (m-1))
 
--- | 'cycle' ties a finite ByteString into a circular one, or equivalently,
--- the infinite repetition of the original ByteString.
---
+{- | 'cycle' ties a finite ByteString into a circular one, or equivalently,
+     the infinite repetition of the original ByteString. For an empty bytestring
+     (like @return 17@) it of course makes an unproductive loop 
+  
+>>> Q.putStrLn $ Q.take 7 $ Q.cycle  "y\n"
+y
+y
+y
+y
+-}
 cycle :: Monad m => ByteString m r -> ByteString m s
-cycle (Empty _) = error "cycle" -- errorEmptyStream "cycle"
-cycle cs    = cs >> cycle cs -- ' where cs' = foldrChunks Chunk cs' cs
-{-# INLINABLE cycle #-}
+cycle = forever
+{-# INLINE cycle #-}
 
 -- | /O(n)/ The 'unfoldr' function is analogous to the Stream \'unfoldr\'.
 -- 'unfoldr' builds a ByteString from a seed value.  The function takes
@@ -776,8 +836,23 @@ unfoldr f s0 = unfoldChunk 32 s0
 -- ---------------------------------------------------------------------
 -- Substrings
 
--- | /O(n\/c)/ 'take' @n@, applied to a ByteString @xs@, returns the prefix
--- of @xs@ of length @n@, or @xs@ itself if @n > 'length' xs@.
+{-| /O(n\/c)/ 'take' @n@, applied to a ByteString @xs@, returns the prefix
+    of @xs@ of length @n@, or @xs@ itself if @n > 'length' xs@.
+
+    Note that in the streaming context this drops the final return value;
+    'splitAt' preserves this information, and is sometimes to be preferred.
+
+>>> Q.putStrLn $ Q.take 8 $ "Is there a God?" >> return True
+Is there
+>>> Q.putStrLn $ "Is there a God?" >> return True
+Is there a God?
+True
+>>> rest <- Q.putStrLn $ Q.splitAt 8 $ "Is there a God?" >> return True
+Is there
+>>> Q.drain rest
+True
+
+-}
 take :: Monad m => Int64 -> ByteString m r -> ByteString m ()
 take i _ | i <= 0 = Empty ()
 take i cs0         = take' i cs0
@@ -790,8 +865,15 @@ take i cs0         = take' i cs0
         take' n (Go m) = Go (liftM (take' n) m)
 {-# INLINABLE take #-}
 
--- | /O(n\/c)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
--- elements, or @[]@ if @n > 'length' xs@.
+{-| /O(n\/c)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
+    elements, or @[]@ if @n > 'length' xs@.
+
+>>> Q.putStrLn $ Q.drop 6 "Wisconsin"
+sin
+>>> Q.putStrLn $ Q.drop 16 "Wisconsin"
+
+>>>
+-}
 drop  :: Monad m => Int64 -> ByteString m r -> ByteString m r
 drop i p | i <= 0 = p
 drop i cs0 = drop' i cs0
@@ -805,7 +887,14 @@ drop i cs0 = drop' i cs0
 {-# INLINABLE drop #-}
 
 
--- | /O(n\/c)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
+{-| /O(n\/c)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
+
+>>> rest <- Q.putStrLn $ Q.splitAt 3 "therapist is a danger to good hyphenation, as Knuth notes"
+the
+>>> Q.putStrLn $ Q.splitAt 19 rest
+rapist is a danger 
+
+-}
 splitAt :: Monad m => Int64 -> ByteString m r -> ByteString m (ByteString m r)
 splitAt i cs0 | i <= 0 = Empty cs0
 splitAt i cs0 = splitAt' i cs0

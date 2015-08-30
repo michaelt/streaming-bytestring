@@ -1561,7 +1561,17 @@ denull = loop where
            Left stream -> loop stream
            Right (bs, qbs) -> Step (chunk bs >> fmap loop qbs)
            
---
+{- Take a builder constructed otherwise and convert it to a genuine
+   streaming bytestring.  
+           
+>>>  Q.putStrLn $ Q.toStreamingByteString $ stringUtf8 "哈斯克尔" <> stringUtf8 " " <> integerDec 98
+哈斯克尔 98
+           
+    <https://gist.github.com/michaelt/6ea89ca95a77b0ef91f3 This benchmark> shows its
+    indistinguishable performance is indistinguishable from @toLazyByteString@
+
+           
+-}
 
 toStreamingByteString
   :: MonadIO m => Builder -> ByteString m ()

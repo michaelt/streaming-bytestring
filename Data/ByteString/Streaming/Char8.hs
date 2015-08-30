@@ -77,7 +77,7 @@ module Data.ByteString.Streaming.Char8 (
     , words
     , linesIndividual
     , wordsIndividual
-    
+    , denull
     -- ** Special folds
 
     , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
@@ -161,7 +161,7 @@ import Data.ByteString.Streaming
     fromChunks, toChunks, fromStrict, toStrict, toStrict', 
     concat, distribute, drain,
     empty, null, null', length, length', append, cycle, 
-    take, drop, splitAt, intercalate, group,
+    take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
     getContents, hGetNonBlocking,

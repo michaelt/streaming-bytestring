@@ -1,5 +1,4 @@
--- | This module, including the documentation, replicates `pipes-http` as
---   closely as will type-check.
+-- | This module replicates `pipes-http` as closely as will type-check.
 -- 
 --   Here is an example GET request that streams the response body to standard
 --   output:
@@ -68,7 +67,7 @@ import Control.Monad.Trans
     * use more advanced request\/response features,
 
     * handle exceptions, and:
-
+    
     * manage cookies.
 
     @http-client-tls@ provides support for TLS connections (i.e. HTTPS).

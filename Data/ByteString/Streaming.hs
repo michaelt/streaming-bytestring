@@ -100,7 +100,8 @@ module Data.ByteString.Streaming (
     , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
     , take             -- take :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m () 
     , takeWhile        -- takeWhile :: (Word8 -> Bool) -> ByteString m r -> ByteString m () 
-
+    , denull
+    
     -- ** Breaking into many substrings
     , split            -- split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r 
     
@@ -493,7 +494,9 @@ unconsChunk = \bs -> case bs of
 nextChunk :: Monad m => ByteString m r -> m (Either r (S.ByteString, ByteString m r))
 nextChunk = \bs -> case bs of
   Empty r    -> return (Left r)
-  Chunk c cs -> return (Right (c,cs))
+  Chunk c cs -> if S.null c 
+    then nextChunk cs
+    else return (Right (c,cs))
   Go m       -> m >>= nextChunk
 {-# INLINABLE nextChunk #-}
 
@@ -1522,3 +1525,32 @@ zipWithStream op zs = loop zs
       Delay mls -> Delay $ liftM (loop a) mls
 
 {-#INLINABLE zipWithStream #-}
+
+{- Remove empty bytestrings from a stream of connected bytestrings,
+   as with Prelude @filter (not . null)@  This does not block streaming.
+
+>>> let humpty = "all the\n\nking\'s horses"
+>>> Q.putStrLn humpty
+all the
+
+king's horses
+>>> Q.putStrLn $ Q.unlines $ Q.denull $ Q.lines humpty
+all the
+king's horses 
+
+>>> putStrLn $ unlines $ filter (not.null) $ lines humpty
+all the
+king's horses
+
+-}
+denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r
+denull = loop where
+  loop stream = do
+    e <- lift $ inspect stream
+    case e of
+      Left r         -> Return r
+      Right bsstream ->  do
+         e <- lift $ nextChunk bsstream
+         case e of 
+           Left stream -> loop stream
+           Right (bs, qbs) -> Step (chunk bs >> fmap loop qbs)

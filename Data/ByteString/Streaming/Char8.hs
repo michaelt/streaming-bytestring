@@ -82,6 +82,11 @@ module Data.ByteString.Streaming.Char8 (
 
     , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
 
+    -- * Builders
+    
+    , toStreamingByteString
+    , toStreamingByteStringWith
+    
     -- * Building ByteStrings
 
     -- ** Infinite ByteStrings
@@ -159,7 +164,8 @@ import Data.ByteString.Streaming.Internal
 import Data.ByteString.Streaming
     (fromLazy, toLazy, toLazy', nextChunk, unconsChunk, 
     fromChunks, toChunks, fromStrict, toStrict, toStrict', 
-    concat, distribute, drain,
+    concat, distribute, drain, toStreamingByteStringWith,
+    toStreamingByteString, 
     empty, null, null', length, length', append, cycle, 
     take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,

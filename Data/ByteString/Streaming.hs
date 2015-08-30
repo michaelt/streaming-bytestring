@@ -109,6 +109,11 @@ module Data.ByteString.Streaming (
     
     , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
 
+    -- * Builders
+    
+    , toStreamingByteStringWith
+    , toStreamingByteString
+    
     -- * Building ByteStrings
     
     -- ** Infinite ByteStrings
@@ -177,6 +182,7 @@ import qualified Data.ByteString        as P  (ByteString) -- type name only
 import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
+import Data.ByteString.Builder.Internal hiding (hPut, defaultChunkSize, empty, append)
 
 import Data.ByteString.Streaming.Internal 
 import Streaming hiding (concats, unfold, distribute, wrap)
@@ -1554,3 +1560,33 @@ denull = loop where
          case e of 
            Left stream -> loop stream
            Right (bs, qbs) -> Step (chunk bs >> fmap loop qbs)
+           
+--
+
+toStreamingByteString
+  :: MonadIO m => Builder -> ByteString m ()
+toStreamingByteString = toStreamingByteStringWith
+ (safeStrategy BI.smallChunkSize BI.defaultChunkSize)
+{-#INLINE toStreamingByteString #-}
+
+
+toStreamingByteStringWith
+   :: MonadIO m =>
+      AllocationStrategy -> Builder -> ByteString m ()
+toStreamingByteStringWith strategy builder0 = do
+       cios <- liftIO (buildStepToCIOS strategy (runBuilder builder0))
+       let loop cios0 = case cios0 of
+              Yield1 bs io   -> Chunk bs $ do 
+                    cios1 <- liftIO io 
+                    loop cios1 
+              Finished buf r -> trimmedChunkFromBuffer buf (Empty r)
+           trimmedChunkFromBuffer buffer k 
+              | S.null bs                            = k
+              |  2 * S.length bs < bufferSize buffer = Chunk (S.copy bs) k
+              | otherwise                            = Chunk bs          k
+              where
+                bs = byteStringFromBuffer buffer
+       loop cios
+{-#INLINABLE toStreamingByteStringWith #-}
+{-#SPECIALIZE toStreamingByteStringWith ::  AllocationStrategy -> Builder -> ByteString IO () #-}
+           

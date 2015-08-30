@@ -1568,6 +1568,7 @@ toStreamingByteString
 toStreamingByteString = toStreamingByteStringWith
  (safeStrategy BI.smallChunkSize BI.defaultChunkSize)
 {-#INLINE toStreamingByteString #-}
+{-#SPECIALIZE toStreamingByteString :: Builder -> ByteString IO () #-}
 
 
 toStreamingByteStringWith

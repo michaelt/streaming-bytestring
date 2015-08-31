@@ -191,8 +191,9 @@ import Streaming hiding (concats, unfold, distribute, wrap)
 import Streaming.Internal (Stream (..))
 import qualified Streaming.Prelude as SP
 
-import Control.Monad            (liftM, forever)
 
+import Control.Monad            (liftM, forever)
+import Data.Monoid              (Monoid(..))
 import Data.Word                (Word8)
 import Data.Int                 (Int64)
 import System.IO                (Handle,openBinaryFile,IOMode(..)

@@ -113,6 +113,8 @@ module Data.ByteString.Streaming (
     
     , toStreamingByteStringWith
     , toStreamingByteString
+    , toBuilder
+    , concatBuilders
     
     -- * Building ByteStrings
     
@@ -1580,7 +1582,9 @@ toStreamingByteString = toStreamingByteStringWith
 {-#INLINE toStreamingByteString #-}
 {-#SPECIALIZE toStreamingByteString :: Builder -> ByteString IO () #-}
 
-
+{-| Take a builder and convert it to a genuine
+   streaming bytestring, using a specific allocation strategy.
+-}
 toStreamingByteStringWith
    :: MonadIO m =>
       AllocationStrategy -> Builder -> ByteString m ()
@@ -1601,3 +1605,31 @@ toStreamingByteStringWith strategy builder0 = do
 {-#INLINABLE toStreamingByteStringWith #-}
 {-#SPECIALIZE toStreamingByteStringWith ::  AllocationStrategy -> Builder -> ByteString IO () #-}
            
+           
+{- Concatenate a stream of builders (not a streaming bytestring!) into a single builder.
+
+>>> let aa = yield (integerDec 10000) >> yield (string8 " is a number.") >> yield (char8 '\n')
+>>>  hPutBuilder  IO.stdout $ concatBuilders aa
+10000 is a number.
+
+-}
+concatBuilders :: Stream (Of Builder) IO () -> Builder
+concatBuilders p = builder $ \bstep r -> do 
+  case p of
+    Return _          -> runBuilderWith mempty bstep r
+    Step (b :> rest)  -> runBuilderWith (b `mappend` concatBuilders rest) bstep r 
+    Delay m            -> m >>= \p' -> runBuilderWith (concatBuilders p') bstep r
+{-#INLINABLE concatBuilders #-}
+
+
+{-| A simple construction of a builder from a byte stream.
+
+>>> let aaa = "10000 is a number\n" :: Q.ByteString IO ()
+>>>  hPutBuilder  IO.stdout $ toBuilder  aaa
+10000 is a number
+
+
+-}
+toBuilder :: ByteString IO () -> Builder
+toBuilder  =  concatBuilders . SP.map byteString . toChunks
+{-#INLINABLE toBuilder #-}

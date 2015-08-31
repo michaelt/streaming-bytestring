@@ -1,5 +1,5 @@
 name:                streaming-bytestring
-version:             0.1.0.3
+version:             0.1.0.4
 synopsis:            effectful byte steams, or: lazy bytestring done right
 description:         This is an implementation of effectful, memory-constrained 
                      bytestrings (byte streams) and functions for streaming 
@@ -33,12 +33,13 @@ description:         This is an implementation of effectful, memory-constrained
                      .
                      > data ByteString     = Empty   | Chunk Strict.ByteString ByteString
                      .
-                     with the minimal effectful variant
+                     with the /minimal/ effectful variant:
                      .
                      > data ByteString m r = Empty r | Chunk Strict.ByteString (ByteString m r) | Go (m (ByteString m r))
                      .
                      (Constructors are necessarily hidden in internal modules in both cases.) 
-                     As a lazy bytestring is implemented internally 
+                     .
+                     That's it. As a lazy bytestring is implemented internally 
                      by a sort of list of strict bytestring chunks, a streaming bytestring is 
                      simply implemented as a /producer/ or /generator/ of strict bytestring chunks.
                      Most operations are defined by simply adding a line to what we find in
@@ -102,17 +103,17 @@ description:         This is an implementation of effectful, memory-constrained
                      this library depends the @streaming@ library, which is used in place 
                      of @free@ to express the (streaming) splitting and division of byte streams. 
                      Those elementary concepts are catastrophically mishandled in the streaming io libraries 
-                     other than pipes; already the @enumerator@ and @iteratee@ libraries
-                     were completely defeated by it: see e.g. the implementation of 
+                     other than pipes. Already the @enumerator@ and @iteratee@ libraries
+                     were completely defeated by it: see e.g. the @enumerator@ implementation of 
                      <http://hackage.haskell.org/package/enumerator-0.4.20/docs/Data-Enumerator-Text.html#v:splitWhen splitWhen and lines>.
                      This will concatenate strict text forever, if that's what is coming
-                     in.
+                     in.  It becomes torture to express elementary distinctions. 
                      .
                      Though we barely alter signatures in @Data.ByteString.Lazy@ 
-                     more than is required
-                     by the types, the point of view that emerges is very much that of
+                     more than is required  by the types, 
+                     the point of view that emerges is very much that of
                      @pipes-bytestring@ and @pipes-group@. In particular
-                     we have the correspondences:
+                     we have these correspondences:
                      .
                      > Lazy.splitAt      :: Int -> ByteString              -> (ByteString, ByteString)
                      > Streaming.splitAt :: Int -> ByteString m r          -> ByteString m (ByteString m r)

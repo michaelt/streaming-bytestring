@@ -86,6 +86,8 @@ module Data.ByteString.Streaming.Char8 (
     
     , toStreamingByteString
     , toStreamingByteStringWith
+    , toBuilder
+    , concatBuilders
     
     -- * Building ByteStrings
 
@@ -165,7 +167,7 @@ import Data.ByteString.Streaming
     (fromLazy, toLazy, toLazy', nextChunk, unconsChunk, 
     fromChunks, toChunks, fromStrict, toStrict, toStrict', 
     concat, distribute, drain, toStreamingByteStringWith,
-    toStreamingByteString, 
+    toStreamingByteString, toBuilder, concatBuilders,
     empty, null, null', length, length', append, cycle, 
     take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,

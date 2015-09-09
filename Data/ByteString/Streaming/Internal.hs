@@ -153,7 +153,7 @@ chunk :: S.ByteString -> ByteString m ()
 chunk bs = consChunk bs (Empty ())
 {-# INLINE chunk #-}
 
---
+
 -- | Smart constructor for 'Go'.
 wrap :: m (ByteString m r) -> ByteString m r
 wrap = Go

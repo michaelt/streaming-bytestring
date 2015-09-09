@@ -1,6 +1,7 @@
 name:                streaming-bytestring
 version:             0.1.0.4
 synopsis:            effectful byte steams, or: lazy bytestring done right
+
 description:         This is an implementation of effectful, memory-constrained 
                      bytestrings (byte streams) and functions for streaming 
                      bytestring manipulation, adequate for non-lazy-io. 

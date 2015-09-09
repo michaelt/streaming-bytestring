@@ -443,7 +443,7 @@ cons' w cs                             = Chunk (S.singleton w) cs
 -- --
 -- | /O(n\/c)/ Append a byte to the end of a 'ByteString'
 snoc :: Monad m => ByteString m r -> Word8 -> ByteString m r
-snoc cs w = do 
+snoc cs w = do    -- cs <* singleton w
   r <- cs
   singleton w
   return r
@@ -480,7 +480,7 @@ uncons (Go m) = m >>= uncons
 {-# INLINABLE uncons #-}
 --
 -- | /O(1)/ Extract the head and tail of a ByteString, or its return value
--- if it is empty
+-- if it is empty. This is the \'natural\' uncons for an effectful byte stream.
 nextByte :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
 nextByte (Empty r) = return (Left r)
 nextByte (Chunk c cs)
@@ -509,7 +509,6 @@ nextChunk = \bs -> case bs of
   Go m       -> m >>= nextChunk
 {-# INLINABLE nextChunk #-}
 
-
 -- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
 -- and non-empty.
 last :: Monad m => ByteString m r -> m Word8
@@ -523,7 +522,7 @@ last (Chunk c0 cs0) = go c0 cs0
    go _ (Chunk c cs) = go c cs
    go x (Go m)       = m >>= go x
 {-# INLINABLE last #-}
- 
+
 last' :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
 last' (Empty r)      = return (Nothing :> r)
 last' (Go m)         = m >>= last'

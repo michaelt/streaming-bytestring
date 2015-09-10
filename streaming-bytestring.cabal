@@ -1,5 +1,5 @@
 name:                streaming-bytestring
-version:             0.1.0.4
+version:             0.1.0.5
 synopsis:            effectful byte steams, or: lazy bytestring done right
 
 description:         This is an implementation of effectful, memory-constrained 

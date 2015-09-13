@@ -1,5 +1,5 @@
 name:                streaming-bytestring
-version:             0.1.0.5
+version:             0.1.0.6
 synopsis:            effectful byte steams, or: lazy bytestring done right
 
 description:         This is an implementation of effectful, memory-constrained 
@@ -17,6 +17,10 @@ description:         This is an implementation of effectful, memory-constrained
                      > Streaming.reread IOStreams.read         :: InputStream ByteString -> ByteString IO ()
                      .
                      and similarly for other rational streaming io libraries. 
+                     .
+                     Problems and questions about the library can be put as issues on 
+                     the github page, or mailed to the 
+                     <https://groups.google.com/forum/#!forum/haskell-pipes pipes list>.
                      .
                      A tutorial module is in the works; 
                      <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here> 
@@ -142,7 +146,7 @@ license-file:        LICENSE
 author:              michaelt
 maintainer:          what_is_it_to_do_anything@yahoo.com
 -- copyright:           
-category:            Data
+category:            Data, Pipes, Streaming
 build-type:          Simple
 extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10

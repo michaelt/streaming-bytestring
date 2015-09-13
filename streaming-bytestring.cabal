@@ -138,7 +138,8 @@ description:         This is an implementation of effectful, memory-constrained
                      <http://hackage.haskell.org/package/pipes-group-1.0.2/docs/Pipes-Group-Tutorial.html pipes-group>
                      and the examples in the documentation for the streaming library. See also
                      <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 simple implementations> 
-                     of the shell-like examples mentioned above.
+                     of the shell-like examples mentioned above. Or, again, put a question on
+                     the issues page or to the pipes list.
 
                     
 license:             BSD3

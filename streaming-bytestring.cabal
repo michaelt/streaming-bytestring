@@ -186,7 +186,7 @@ library
                      , mtl >=2.1 && <2.3
                      , mmorph >=1.0 && <1.2
                      , transformers >=0.3 && <0.5
-                     , streaming > 0.1.0.8 && < 0.1.1
+                     , streaming > 0.1.0.15 && < 0.1.1
                      
   if flag(use-bytestring-builder)
     build-depends:     bytestring < 0.10.2.0

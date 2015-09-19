@@ -176,8 +176,8 @@ library
                        
   -- other-modules:       
   other-extensions:    CPP, BangPatterns, ForeignFunctionInterface, DeriveDataTypeable, Unsafe
-  build-depends:       base >=4.7 && <4.9
-                     , bytestring >=0.10 && <0.11
+  build-depends:       base  <4.9
+                     , bytestring 
                      , deepseq 
                      , mtl >=2.1 && <2.3
                      , mmorph >=1.0 && <1.2

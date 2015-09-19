@@ -1,6 +1,6 @@
 name:                streaming-bytestring
 version:             0.1.0.8
-synopsis:            effectful byte steams, or: bytestring io done right
+synopsis:            effectful byte steams, or: bytestring io done right.
 
 description:         This is an implementation of effectful, memory-constrained 
                      bytestrings (byte streams) and functions for streaming 

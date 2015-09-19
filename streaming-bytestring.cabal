@@ -165,8 +165,15 @@ maintainer:          what_is_it_to_do_anything@yahoo.com
 -- copyright:           
 category:            Data, Pipes, Streaming
 build-type:          Simple
-extra-source-files:  ChangeLog.md
+extra-source-files:  README.md
 cabal-version:       >=1.10
+stability:           Experimental
+homepage:            https://github.com/michaelt/streaming-bytestring
+bug-reports:         https://github.com/michaelt/streaming-bytestring/issues
+source-repository head
+    type: git
+    location: https://github.com/michaelt/streaming-bytestring
+
 
 library
   exposed-modules:     Data.ByteString.Streaming

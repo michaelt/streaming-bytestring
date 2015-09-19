@@ -25,6 +25,7 @@ module Data.ByteString.Streaming.Internal (
    , unfoldrNE
    , reread
    , inlinePerformIO
+   , unsafeLast
   ) where
 
 import Prelude hiding
@@ -268,6 +269,13 @@ unpackBytes bss = dematerialize bss
           | otherwise     = do x <- peek p
                                loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
 {-# INLINABLE unpackBytes #-}
+
+unsafeLast :: S.ByteString -> Word8
+unsafeLast (S.PS x s l) = 
+    accursedUnutterablePerformIO $ withForeignPtr x $ \p -> peekByteOff p (s+l-1)
+ where
+      accursedUnutterablePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
+{-# INLINE unsafeLast #-}
 
 inlinePerformIO :: IO a -> a
 inlinePerformIO (IO m) = case m realWorld# of (# _, r #) -> r

@@ -518,7 +518,7 @@ last (Chunk c0 cs0) = go c0 cs0
  where 
    go c (Empty _)    = if S.null c 
        then error "Data.ByteString.Streaming.last: empty string"
-       else return $ S.unsafeLast c
+       else return $ unsafeLast c
    go _ (Chunk c cs) = go c cs
    go x (Go m)       = m >>= go x
 {-# INLINABLE last #-}
@@ -528,7 +528,7 @@ last' (Empty r)      = return (Nothing :> r)
 last' (Go m)         = m >>= last'
 last' (Chunk c0 cs0) = go c0 cs0
   where 
-    go c (Empty r)    = return $ (Just (S.unsafeLast c) :> r)
+    go c (Empty r)    = return $ (Just (unsafeLast c) :> r)
     go _ (Chunk c cs) = go c cs
     go x (Go m)       = m >>= go x  
 {-# INLINABLE last' #-}

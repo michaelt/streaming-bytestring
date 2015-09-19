@@ -168,10 +168,6 @@ build-type:          Simple
 extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
-flag use-bytestring-builder
-  description: Use bytestring-builder package
-  default: False
-  
 library
   exposed-modules:     Data.ByteString.Streaming
                        , Data.ByteString.Streaming.Char8

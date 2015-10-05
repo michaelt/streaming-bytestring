@@ -189,7 +189,7 @@ library
                      , mtl >=2.1 && <2.3
                      , mmorph >=1.0 && <1.2
                      , transformers >=0.3 && <0.5
-                     , streaming > 0.1.0.15 && < 0.1.2
+                     , streaming > 0.1.0.20 && < 0.1.1.2
   if impl(ghc < 7.8) 
     build-depends:
                      bytestring < 0.10.4.0

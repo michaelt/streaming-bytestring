@@ -508,7 +508,7 @@ linesIndividual = mapsM R.toStrict' . lines
 
 -- | 
 unlinesIndividual :: Monad m => Stream (Of B.ByteString) m r -> ByteString m r 
-unlinesIndividual bss =  R.concat $ for bss (\bs -> layer $ R.chunk bs >> singleton '\n')
+unlinesIndividual bss =  R.concat $ for bss (\bs -> elevate $ R.chunk bs >> singleton '\n')
 
 -- | 'words' breaks a byte stream up into a succession of byte streams 
 --   corresponding to words, breaking Chars representing white space. This is 
@@ -562,7 +562,7 @@ wordsIndividual = mapsM R.toStrict' . words
 
 -}
 unwordsIndividual :: Monad m => Stream (Of B.ByteString) m r -> ByteString m r 
-unwordsIndividual bss =  R.concat $ for bss (\bs -> layer $ R.chunk bs >> singleton ' ')
+unwordsIndividual bss =  R.concat $ for bss (\bs -> elevate $ R.chunk bs >> singleton ' ')
 
 
 

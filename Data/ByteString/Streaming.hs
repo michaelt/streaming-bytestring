@@ -1559,10 +1559,23 @@ denull = loop where
       Left r         -> Return r
       Right bsstream ->  do
          e <- lift $ nextChunk bsstream
-         case e of 
+         case e of
            Left stream -> loop stream
            Right (bs, qbs) -> Step (chunk bs >> fmap loop qbs)
-           
+
+-- denull :: Monad m => Stream (ByteString m) m r -> Stream (Stream (ByteString m) m) m r
+-- denull = loop2 where
+-- loop2 stream = do
+--      e <- lift $ inspect stream
+--      case e of
+--        Left r         -> Return r
+--        Right bsstream ->  do
+--           e <- lift $ nextChunk bsstream
+--           case e of
+--             Left stream ->  Step $ Return $ loop2 stream
+--             Right (bs, qbs) -> Step $ fmap loop2 (chunk bs >> qbs)
+-- {-#INLINABLE denull #-}
+
 {- Take a builder constructed otherwise and convert it to a genuine
    streaming bytestring.  
            

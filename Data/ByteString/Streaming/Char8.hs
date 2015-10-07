@@ -108,6 +108,7 @@ module Data.ByteString.Streaming.Char8 (
     , length'
     , count
     , count'
+    , readInt
     -- * I\/O with 'ByteString's
 
     -- ** Standard input and output
@@ -182,7 +183,7 @@ import System.IO                (Handle,openBinaryFile,IOMode(..)
 import qualified System.IO  as IO
 import System.IO.Unsafe
 import Control.Exception        (bracket)
-
+import Data.Char (isDigit)
 import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
@@ -602,3 +603,24 @@ putStrLn bs = hPut IO.stdout (snoc bs '\n')
 -- , null'
 -- , count
 -- , count'
+
+{-| This will read positive or negative Ints that require 18 or fewer characters.
+-}
+readInt :: Monad m => ByteString m r -> m (Maybe Int, ByteString m r)
+readInt = go . toStrict' . splitAt 18 where
+  go m = do 
+    (bs :> rest) <- m
+    case Char8.readInt bs of
+      Nothing -> return (Nothing, chunk bs >> rest)
+      Just (n,more) -> if B.null more 
+        then do 
+          e <- uncons rest
+          return $ case e of
+            Left r -> (Just n, return r)
+            Right (c,rest') -> if isDigit c 
+               then (Nothing, chunk bs'  >> cons' c rest')
+               else (Just n,  chunk more >> cons' c rest')
+        else return (Just n,  chunk more >> rest)
+{-#INLINABLE readInt #-}
+
+         -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))

@@ -21,7 +21,7 @@ module Data.ByteString.Streaming.Internal (
    , unpackBytes        -- :: Monad m => ByteString m r -> Stream Word8_ m r
    , packBytes
    , chunk             --  :: ByteString -> ByteString m ()
-   , wrap 
+   , mwrap 
    , unfoldrNE
    , reread
    , inlinePerformIO
@@ -45,7 +45,7 @@ import qualified Data.ByteString        as S  -- S for strict (hmm...)
 import qualified Data.ByteString.Internal as S
 
 import Streaming (Of(..))
-import Streaming.Internal hiding (concats, wrap, step)
+import Streaming.Internal hiding (concats, mwrap, step)
 import qualified Streaming.Prelude as SP
 
 import Foreign.ForeignPtr       (withForeignPtr)
@@ -156,9 +156,9 @@ chunk bs = consChunk bs (Empty ())
 
 
 -- | Smart constructor for 'Go'.
-wrap :: m (ByteString m r) -> ByteString m r
-wrap = Go
-{-# INLINE wrap #-}
+mwrap :: m (ByteString m r) -> ByteString m r
+mwrap = Go
+{-# INLINE mwrap #-}
 -- | Construct a succession of chunks from its Church encoding (compare @GHC.Exts.build@)
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r
@@ -170,12 +170,12 @@ materialize phi = phi Empty Chunk Go
 dematerialize :: Monad m
               => ByteString m r
               -> (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
-dematerialize x0 nil cons wrap = loop SPEC x0
+dematerialize x0 nil cons mwrap = loop SPEC x0
   where
   loop !_ x = case x of
      Empty r    -> nil r
      Chunk b bs -> cons b (loop SPEC bs )
-     Go ms -> wrap (liftM (loop SPEC) ms)
+     Go ms -> mwrap (liftM (loop SPEC) ms)
 {-# INLINABLE dematerialize #-}
 ------------------------------------------------------------------------
 

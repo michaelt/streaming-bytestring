@@ -63,8 +63,9 @@ module Data.ByteString.Streaming (
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
     , toStrict'        -- toStrict' :: Monad m => ByteString m r -> m (Of ByteString r) 
-    , drain
-    , wrap
+    , effects
+    , drained
+    , mwrap
     
     -- * Transforming ByteStrings
     , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
@@ -139,6 +140,7 @@ module Data.ByteString.Streaming (
     , length'
     , null
     , null'
+    , null_
     , count
     , count'
     -- * I\/O with 'ByteString's
@@ -187,7 +189,7 @@ import qualified Data.ByteString.Unsafe as S
 import Data.ByteString.Builder.Internal hiding (hPut, defaultChunkSize, empty, append)
 
 import Data.ByteString.Streaming.Internal 
-import Streaming hiding (concats, unfold, distribute, wrap)
+import Streaming hiding (concats, unfold, distribute, mwrap)
 import Streaming.Internal (Stream (..))
 import qualified Streaming.Prelude as SP
 
@@ -205,6 +207,7 @@ import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Storable
 import Foreign.Ptr
 import Data.Functor.Compose
+import Data.Functor.Sum
 -- | /O(n)/ Concatenate a stream of byte streams.
 concat :: Monad m => Stream (ByteString m) m r -> ByteString m r
 concat x = destroy x join Go Empty 
@@ -221,37 +224,56 @@ distribute ls = dematerialize ls
              (join . hoist (Go . liftM Empty))
 {-# INLINE distribute #-}
 
+{-| Perform the effects contained in an effectful bytestring, ignoring the bytes.
 
-drain :: Monad m => ByteString m r -> m r
-drain bs = case bs of 
+-}
+effects :: Monad m => ByteString m r -> m r
+effects bs = case bs of 
   Empty r      -> return r
-  Go m         -> m >>= drain
-  Chunk _ rest -> drain rest
-{-# INLINABLE drain #-}
+  Go m         -> m >>= effects
+  Chunk _ rest -> effects rest
+{-# INLINABLE effects #-}
+
+
+{-| Perform the effects contained in the second in an effectful pair of bytestrings, 
+    ignoring the bytes. It would typically be used at the type
+
+>  ByteString m (ByteString m r) -> ByteString m r
+
+-}
+
+drained :: (Monad m, MonadTrans t, Monad (t m)) => t m (ByteString m r) -> t m r
+drained t = t >>= lift . effects
 -- -----------------------------------------------------------------------------
 -- Introducing and eliminating 'ByteString's
 
--- | /O(1)/ The empty 'ByteString' -- i.e. return ()
+{-| /O(1)/ The empty 'ByteString' -- i.e. @return ()@ Note that @ByteString m w@ is
+  generally a monoid for monoidal values of @w@, like @()@
+-}
 empty :: ByteString m ()
 empty = Empty ()
 {-# INLINE empty #-}
 
--- | /O(1)/ Yield a 'Word8' as a minimal 'ByteString'
+{-| /O(1)/ Yield a 'Word8' as a minimal 'ByteString'
+-}
 singleton :: Monad m => Word8 -> ByteString m ()
 singleton w = Chunk (S.singleton w)  (Empty ())
 {-# INLINE singleton #-}
 
--- | /O(n)/ Convert a monadic stream of individual 'Word8's into a packed byte stream.
+{-| /O(n)/ Convert a monadic stream of individual 'Word8's into a packed byte stream.
+-}
 pack :: Monad m => Stream (Of Word8) m r -> ByteString m r
 pack = packBytes
 {-#INLINE pack #-}
 
--- | /O(n)/ Converts a packed byte stream into a stream of individual bytes.
+{-| /O(n)/ Converts a packed byte stream into a stream of individual bytes.
+-}
 unpack ::  Monad m => ByteString m r -> Stream (Of Word8) m r 
 unpack = unpackBytes
 
--- | /O(c)/ Convert a monadic stream of individual strict 'ByteString' 
--- chunks into a byte stream.
+{-| /O(c)/ Convert a monadic stream of individual strict 'ByteString' 
+   chunks into a byte stream.
+-}
 fromChunks :: Monad m => Stream (Of P.ByteString) m r -> ByteString m r
 fromChunks cs = destroy cs 
   (\(bs :> rest) -> Chunk bs rest)
@@ -259,8 +281,9 @@ fromChunks cs = destroy cs
   return
 {-#INLINE fromChunks#-}
 
--- | /O(c)/ Convert a byte stream into a stream of individual strict bytestrings.
--- This of course exposes the internal chunk structure.
+{-| /O(c)/ Convert a byte stream into a stream of individual strict bytestrings.
+    This of course exposes the internal chunk structure.
+-}
 toChunks :: Monad m => ByteString m r -> Stream (Of P.ByteString) m r
 toChunks bs =
   dematerialize bs
@@ -269,18 +292,19 @@ toChunks bs =
       Delay
 {-#INLINE toChunks#-}
 
--- |/O(1)/ yield a strict 'ByteString' chunk. 
+{-| /O(1)/ yield a strict 'ByteString' chunk. 
+-}
 fromStrict :: P.ByteString -> ByteString m ()
 fromStrict bs | S.null bs = Empty ()
               | otherwise = Chunk bs  (Empty ())
 {-# INLINE fromStrict #-}
 
--- |/O(n)/ Convert a byte stream into a single strict 'ByteString'.
---
--- Note that this is an /expensive/ operation that forces the whole monadic
--- ByteString into memory and then copies all the data. If possible, try to
--- avoid converting back and forth between streaming and strict bytestrings.
+{-| /O(n)/ Convert a byte stream into a single strict 'ByteString'.
 
+  Note that this is an /expensive/ operation that forces the whole monadic
+  ByteString into memory and then copies all the data. If possible, try to
+  avoid converting back and forth between streaming and strict bytestrings.
+-}
 toStrict :: Monad m => ByteString m () -> m (S.ByteString)
 toStrict = liftM S.concat . SP.toListM . toChunks
 {-# INLINE toStrict #-}
@@ -315,11 +339,8 @@ fromLazy :: Monad m => BI.ByteString -> ByteString m ()
 fromLazy = BI.foldrChunks Chunk (Empty ())
 {-# INLINE fromLazy #-}
 
-{- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
-    with the same internal chunk structure.
-
->>> Q.toLazy "hello"
-"hello"
+{-| /O(n)/ Convert an effectful byte stream into a single lazy 'ByteString'
+    with the same internal chunk structure. See @toLazy'@
 
 -}
 toLazy :: Monad m => ByteString m () -> m BI.ByteString
@@ -329,14 +350,24 @@ toLazy bs = dematerialize bs
                 join
 {-#INLINE toLazy #-}   
 
-{- |/O(n)/ Convert a monadic byte stream into a single lazy 'ByteString'
-    with the same invisible chunk structure, retaining the original
+{-| /O(n)/ Convert an effectful byte stream into a single lazy 'ByteString'
+    with the same internal chunk structure, retaining the original
     return value. 
+
+    This is the canonical way of breaking streaming (@toStrict@ and the
+    like are far more demonic). Essentially one is dividing the interleaved
+    layers of effects and bytes into one immense layer of effects, 
+    followed by the memory of the succession of bytes. 
+
+    Because one preserves the return value, @toLazy'@ is a suitable argument
+    for 'Streaming.mapsM'
+
+>   S.mapsM Q.toLazy' :: Stream (ByteString m) m r -> Stream (Of L.ByteString) m r
 
 >>> Q.toLazy' "hello"
 "hello" :> ()
->>> S.toListM $ mapsM Q.toLazy' $ Q.lines $ "one\ntwo\three\nfour\nfive\n"
-["one","two\three","four","five",""]
+>>> S.toListM $ mapsM Q.toLazy' $ Q.lines $ "one\ntwo\nthree\nfour\nfive\n"
+["one","two","three","four","five",""]  -- [L.ByteString]
 
 -}
 toLazy' :: Monad m => ByteString m r -> m (Of BI.ByteString r)
@@ -354,7 +385,8 @@ toLazy' bs0 = dematerialize bs0
 -- ---------------------------------------------------------------------
 -- Basic interface
 --
-{-| /O(1)/ Test whether a ByteString is empty. The value is of course in the base monad.
+{-| /O(1)/ Test whether an ByteString is empty. The value is of course in 
+  the monad of the effects.
 
 >>>  Q.null "one\ntwo\three\nfour\nfive\n"
 False
@@ -377,7 +409,6 @@ null (Chunk bs rest) = if S.null bs
 
 >>> Q.null' "one\ntwo\three\nfour\nfive\n"
 False :> ()
-[*Main]
 >>> Q.null' ""
 True :> ()
 >>> S.print $ mapsM R.null' $ Q.lines "yours,\nMeredith"
@@ -391,9 +422,22 @@ null' (Go m)     = m >>= null'
 null' (Chunk bs rest) = if S.null bs 
    then null' rest 
    else do 
-     r <- SP.drain (toChunks rest)
+     r <- SP.effects (toChunks rest)
      return (False :> r)
 {-# INLINABLE null' #-}
+
+{-| /O1/ Distinguish empty from non-empty lines, while maintaining streaming.
+
+
+-}
+
+null_ :: Monad m => ByteString m r -> m (Sum (ByteString m) (ByteString m) r)
+null_ (Empty r)  = return (InL (return r))
+null_ (Go m)     = m >>= null_
+null_ (Chunk bs rest) = if S.null bs 
+   then null_ rest 
+   else return (InR (Chunk bs rest))
+{-# INLINABLE null_ #-}
 
 
 length :: Monad m => ByteString m r -> m Int
@@ -462,7 +506,7 @@ head' (Empty r)  = return (Nothing :> r)
 head' (Chunk c rest) = case S.uncons c of 
   Nothing -> head' rest
   Just (w,_) -> do
-    r <- SP.drain $ toChunks rest
+    r <- SP.effects $ toChunks rest
     return $! (Just w) :> r
 head' (Go m)      = m >>= head'
 {-# INLINE head' #-}
@@ -659,7 +703,7 @@ fold' step0 begin done p0 = loop p0 begin
 -- ---------------------------------------------------------------------
 -- Special folds
 
--- | /O(n)/ Concatenate a list of ByteStrings.
+-- /O(n)/ Concatenate a list of ByteStrings.
 -- concat :: (Monad m) => [ByteString m ()] -> ByteString m ()
 -- concat css0 = to css0
 --   where
@@ -763,7 +807,7 @@ fold' step0 begin done p0 = loop p0 begin
 > iterate f x == [x, f x, f (f x), ...]
 
 >>> R.stdout $ R.take 50 $ R.iterate succ 39
-()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXY>>> 
+()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXY
 >>> Q.putStrLn $ Q.take 50 $ Q.iterate succ '\''
 ()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXY
 
@@ -776,7 +820,7 @@ iterate f = unfoldr (\x -> case f x of !x' -> Right (x', x'))
      element.
 
 >>> R.stdout $ R.take 50 $ R.repeat 60
-<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>> 
+<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 >>> Q.putStrLn $ Q.take 50 $ Q.repeat 'z'
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 -}
@@ -860,7 +904,7 @@ Is there a God?
 True
 >>> rest <- Q.putStrLn $ Q.splitAt 8 $ "Is there a God?" >> return True
 Is there
->>> Q.drain rest
+>>> Q.effects  rest
 True
 
 -}
@@ -1277,17 +1321,17 @@ filter p s = go s
 -- If so, close when done.
 --
 
--- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
--- are read on demand, in at most @k@-sized chunks. It does not block
--- waiting for a whole @k@-sized chunk, so if less than @k@ bytes are
--- available then they will be returned immediately as a smaller chunk.
---
--- The handle is closed on EOF.
---
--- Note: the 'Handle' should be placed in binary mode with
--- 'System.IO.hSetBinaryMode' for 'hGetContentsN' to
--- work correctly.
---
+{- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
+    are read on demand, in at most @k@-sized chunks. It does not block
+    waiting for a whole @k@-sized chunk, so if less than @k@ bytes are
+    available then they will be returned immediately as a smaller chunk.
+
+    The handle is closed on EOF.
+
+    Note: the 'Handle' should be placed in binary mode with
+    'System.IO.hSetBinaryMode' for 'hGetContentsN' to
+    work correctly.
+-}
 hGetContentsN :: MonadIO m => Int -> Handle -> ByteString m ()
 hGetContentsN k h = loop -- TODO close on exceptions
   where
@@ -1341,15 +1385,15 @@ illegalBufferSize handle fn sz =
       msg = fn ++ ": illegal ByteString size " ++ showsPrec 9 sz []
 {-# INLINABLE illegalBufferSize #-}
 
--- | Read entire handle contents /lazily/ into a 'ByteString'. Chunks
--- are read on demand, using the default chunk size.
---
--- Once EOF is encountered, the Handle is closed.
---
--- Note: the 'Handle' should be placed in binary mode with
--- 'System.IO.hSetBinaryMode' for 'hGetContents' to
--- work correctly.
+{-| Read entire handle contents /lazily/ into a 'ByteString'. Chunks
+    are read on demand, using the default chunk size.
 
+    Once EOF is encountered, the Handle is closed.
+
+    Note: the 'Handle' should be placed in binary mode with
+    'System.IO.hSetBinaryMode' for 'hGetContents' to
+    work correctly.
+-}
 hGetContents :: MonadIO m => Handle -> ByteString m ()
 hGetContents = hGetContentsN defaultChunkSize
 {-#INLINE hGetContents #-}
@@ -1429,7 +1473,7 @@ stdout ::  MonadIO m => ByteString m r -> m r
 stdout = hPut IO.stdout
 {-#INLINE stdout#-}
 
--- | Similar to 'hPut' except that it will never block. Instead it returns
+-- -- | Similar to 'hPut' except that it will never block. Instead it returns
 -- any tail that did not get written. This tail may be 'empty' in the case that
 -- the whole string was written, or the whole original string if nothing was
 -- written. Partial writes are also possible.
@@ -1462,17 +1506,17 @@ stdout = hPut IO.stdout
 -- putStrLn :: ByteString -> IO ()
 -- putStrLn ps = hPut stdout ps >> hPut stdout (singleton 0x0a)
 --
--- {-# DEPRECATED putStrLn
---     "Use Data.ByteString.Lazy.Char8.putStrLn instead. (Functions that rely on ASCII encodings belong in Data.ByteString.Lazy.Char8)"
---   #-}
---
--- -- | The interact function takes a function of type @ByteString -> ByteString@
--- -- as its argument. The entire input from the standard input device is passed
--- -- to th is function as its argument, and the resulting string is output on the
--- -- standard output device.
--- --
+
+
+{- | The interact function takes a function of type @ByteString -> ByteString@
+   as its argument. The entire input from the standard input device is passed
+   to this function as its argument, and the resulting string is output on the
+   standard output device.
+
+> interact morph = stdout (morph stdin)
+-}
 interact :: (ByteString IO () -> ByteString IO r) -> IO r
-interact transformer = stdout (transformer stdin)
+interact f = stdout (f stdin)
 {-# INLINE interact #-}
 
 -- -- ---------------------------------------------------------------------

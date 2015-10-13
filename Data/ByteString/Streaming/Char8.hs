@@ -26,8 +26,9 @@ module Data.ByteString.Streaming.Char8 (
     , toLazy'
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
     , toStrict'
-    , drain
-    , wrap
+    , effects
+    , drained
+    , mwrap
 
 
 
@@ -108,6 +109,7 @@ module Data.ByteString.Streaming.Char8 (
     , length'
     , count
     , count'
+    , null_
     , readInt
     -- * I\/O with 'ByteString's
 
@@ -156,7 +158,7 @@ import Data.ByteString.Internal (c2w,w2c)
 import qualified Data.ByteString.Unsafe as B
 import qualified Data.ByteString.Char8 as Char8
 
-import Streaming hiding (concats, unfold, distribute, wrap)
+import Streaming hiding (concats, unfold, distribute, mwrap)
 import Streaming.Internal (Stream (..))
 import qualified Streaming.Prelude as S
 import qualified Streaming as S
@@ -167,9 +169,9 @@ import Data.ByteString.Streaming.Internal
 import Data.ByteString.Streaming
     (fromLazy, toLazy, toLazy', nextChunk, unconsChunk, 
     fromChunks, toChunks, fromStrict, toStrict, toStrict', 
-    concat, distribute, drain, toStreamingByteStringWith,
+    concat, distribute, effects, drained, mwrap, toStreamingByteStringWith,
     toStreamingByteString, toBuilder, concatBuilders,
-    empty, null, null', length, length', append, cycle, 
+    empty, null, null', null_, length, length', append, cycle, 
     take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
@@ -618,7 +620,7 @@ readInt = go . toStrict' . splitAt 18 where
           return $ case e of
             Left r -> (Just n, return r)
             Right (c,rest') -> if isDigit c 
-               then (Nothing, chunk bs'  >> cons' c rest')
+               then (Nothing, chunk bs   >> cons' c rest')
                else (Just n,  chunk more >> cons' c rest')
         else return (Just n,  chunk more >> rest)
 {-#INLINABLE readInt #-}

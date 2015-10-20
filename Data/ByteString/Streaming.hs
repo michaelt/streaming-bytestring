@@ -599,8 +599,7 @@ last_ (Chunk c0 cs0) = go c0 cs0
        else return $ unsafeLast c
    go _ (Chunk c cs) = go c cs
    go x (Go m)       = m >>= go x
-{-# INLINABLE last_ #-
-]
+{-# INLINABLE last_ #-}
 
 
 last :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)

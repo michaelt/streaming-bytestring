@@ -316,7 +316,8 @@ toStrict_ = liftM S.concat . SP.toList_ . toChunks
 
 > mapsM R.toStrict :: Monad m => Stream (ByteString m) m r -> Stream (Of ByteString) m r 
  
-   It is subject to all the objections one makes to 'toStrict'. 
+   It is subject to all the objections one makes to Data.ByteString.Lazy 'toStrict'; 
+   all of these are devastating. 
 -}
 toStrict :: Monad m => ByteString m r -> m (Of S.ByteString r)
 toStrict bs = do 
@@ -324,7 +325,7 @@ toStrict bs = do
   return $ (S.concat bss :> r)
 {-# INLINE toStrict #-}
 
-{- |/O(c)/ Transmute a lazy bytestring to its representation
+{- |/O(c)/ Transmute a pseudo-pure lazy bytestring to its representation
     as a monadic stream of chunks.
 
 >>> Q.putStrLn $ Q.fromLazy "hi"
@@ -340,7 +341,8 @@ fromLazy = BI.foldrChunks Chunk (Empty ())
 {-# INLINE fromLazy #-}
 
 {-| /O(n)/ Convert an effectful byte stream into a single lazy 'ByteString'
-    with the same internal chunk structure. See @toLazy'@
+    with the same internal chunk structure. See @toLazy@ which preserve
+    connectedness by keeping the return value of the effectful bytestring.
 
 -}
 toLazy_ :: Monad m => ByteString m r -> m BI.ByteString
@@ -359,14 +361,14 @@ toLazy_ bs = dematerialize bs
     layers of effects and bytes into one immense layer of effects, 
     followed by the memory of the succession of bytes. 
 
-    Because one preserves the return value, @toLazy'@ is a suitable argument
+    Because one preserves the return value, @toLazy@ is a suitable argument
     for 'Streaming.mapsM'
 
->   S.mapsM Q.toLazy' :: Stream (ByteString m) m r -> Stream (Of L.ByteString) m r
+>   S.mapsM Q.toLazy :: Stream (ByteString m) m r -> Stream (Of L.ByteString) m r
 
->>> Q.toLazy' "hello"
+>>> Q.toLazy "hello"
 "hello" :> ()
->>> S.toListM $ mapsM Q.toLazy' $ Q.lines $ "one\ntwo\nthree\nfour\nfive\n"
+>>> S.toListM $ traverses Q.toLazy $ Q.lines "one\ntwo\nthree\nfour\nfive\n"
 ["one","two","three","four","five",""]  -- [L.ByteString]
 
 -}

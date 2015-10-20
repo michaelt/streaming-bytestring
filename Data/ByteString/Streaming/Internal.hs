@@ -155,7 +155,14 @@ chunk bs = consChunk bs (Empty ())
 {-# INLINE chunk #-}
 
 
--- | Smart constructor for 'Go'.
+{-| An effect that results in an effectful bytestring can be viewed an effectful bytestring. 
+    Compare Streaming.mwrap. The equivalent of 
+  
+>>> Streaming.wrap :: f (Stream f m r) -> Stream f m r
+
+    is here 
+
+>>> \bs rest -> chunk bs >> rest :: ByteString -> ByteString m r -> ByteString m r
 mwrap :: m (ByteString m r) -> ByteString m r
 mwrap = Go
 {-# INLINE mwrap #-}

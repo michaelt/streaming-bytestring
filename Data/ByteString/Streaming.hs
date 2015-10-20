@@ -80,7 +80,7 @@ module Data.ByteString.Streaming (
     , filter           -- filter :: (Word8 -> Bool) -> ByteString m r -> ByteString m r 
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
     , nextByte -- nextByte :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
-
+    , denull
    
     -- * Direct chunk handling 
     , unconsChunk
@@ -101,7 +101,6 @@ module Data.ByteString.Streaming (
     , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
     , take             -- take :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m () 
     , takeWhile        -- takeWhile :: (Word8 -> Bool) -> ByteString m r -> ByteString m () 
-    , denull
     
     -- ** Breaking into many substrings
     , split            -- split :: Monad m => Word8 -> ByteString m r -> Stream (ByteString m) m r 
@@ -384,6 +383,7 @@ toLazy bs0 = dematerialize bs0
     
 
 
+
 -- ---------------------------------------------------------------------
 -- Basic interface
 --
@@ -405,6 +405,13 @@ null_ (Chunk bs rest) = if S.null bs
   else return False
 {-# INLINABLE null_ #-}
 
+
+{-| Remove empty ByteStrings from a stream of bytestrings.
+
+-}
+denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r 
+denull = hoist (run . maps effects) . separate . mapsM nulls
+{-#INLINE denull #-}
 
 {- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
 -- to reach the return value, this operation must check the whole length of the string.
@@ -428,18 +435,42 @@ null (Chunk bs rest) = if S.null bs
      return (False :> r)
 {-# INLINABLE null #-}
 
-{-| /O1/ Distinguish empty from non-empty lines, while maintaining streaming.
+{-| /O1/ Distinguish empty from non-empty lines, while maintaining streaming; 
+    the empty ByteStrings are on the right
 
->>> nulls       ::  ByteString m r -> m (Sum (ByteString m) (ByteString m) r)
->>> mapsM nulls :: 
+>>> nulls  ::  ByteString m r -> m (Sum (ByteString m) (ByteString m) r)
+
+    There are many ways to remove null bytestrings from a 
+    @Stream (ByteString m) m r@ (besides using @denull@). If we pass next to
+
+>>> mapsM nulls bs :: Stream (Sum (ByteString m) (ByteString m)) m r
+
+    then can then apply @Streaming.separate@ to get
+
+>>> separate (mapsM nulls bs) :: Stream (ByteString m) (Stream (ByteString m) m) r
+
+    The inner monad is now made of the empty bytestrings; we act on this 
+    with @hoist@ , considering that 
+
+>>> :t Q.effects . Q.concat
+Q.effects . Q.concat
+  :: Monad m => Stream (Q.ByteString m) m r -> m r
+
+    we have 
+
+>>> hoist (Q.effects . Q.concat) . separate . mapsM Q.nulls
+  :: Monad n =>  Stream (Q.ByteString n) n b -> Stream (Q.ByteString n) n b
+
+
+
 -}
 
 nulls :: Monad m => ByteString m r -> m (Sum (ByteString m) (ByteString m) r)
-nulls (Empty r)  = return (InL (return r))
+nulls (Empty r)  = return (InR (return r))
 nulls (Go m)     = m >>= nulls
 nulls (Chunk bs rest) = if S.null bs 
    then nulls rest 
-   else return (InR (Chunk bs rest))
+   else return (InL (Chunk bs rest))
 {-# INLINABLE nulls #-}
 
 
@@ -568,7 +599,9 @@ last_ (Chunk c0 cs0) = go c0 cs0
        else return $ unsafeLast c
    go _ (Chunk c cs) = go c cs
    go x (Go m)       = m >>= go x
-{-# INLINABLE last_ #-}
+{-# INLINABLE last_ #-
+]
+
 
 last :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
 last (Empty r)      = return (Nothing :> r)
@@ -580,6 +613,14 @@ last (Chunk c0 cs0) = go c0 cs0
     go x (Go m)       = m >>= go x  
 {-# INLINABLE last #-}
 
+
+isPrefixOf :: Monad m => S.ByteString -> ByteString m r -> m (Sum (ByteString m) (ByteString m) r)
+isPrefixOf bytes bs = do
+  let len = S.length bytes
+  (bytes' :> rest) <- toStrict $ splitAt (fromIntegral len) bs
+  if bytes' == bytes 
+    then return $ InR $ chunk bytes' >> rest
+    else return $ InL $ chunk bytes' >> rest
 -- -- | /O(n\/c)/ Return all the elements of a 'ByteString' except the last one.
 -- init :: ByteString -> ByteString
 -- init Empty          = errorEmptyStream "init"
@@ -1580,48 +1621,6 @@ zipWithStream op zs = loop zs
       Delay mls -> Delay $ liftM (loop a) mls
 
 {-#INLINABLE zipWithStream #-}
-
-{- Remove empty bytestrings from a stream of connected bytestrings,
-   as with Prelude @filter (not . null)@  This does not block streaming.
-
->>> let humpty = "all the\n\nking\'s horses"
->>> Q.putStrLn humpty
-all the
-
-king's horses
->>> Q.putStrLn $ Q.unlines $ Q.denull $ Q.lines humpty
-all the
-king's horses 
-
->>> putStrLn $ unlines $ filter (not.null) $ lines humpty
-all the
-king's horses
-
--}
-denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r
-denull = loop where
-  loop stream = do
-    e <- lift $ inspect stream
-    case e of
-      Left r         -> Return r
-      Right bsstream ->  do
-         e <- lift $ nextChunk bsstream
-         case e of
-           Left stream -> loop stream
-           Right (bs, qbs) -> Step (chunk bs >> fmap loop qbs)
-
--- denull :: Monad m => Stream (ByteString m) m r -> Stream (Stream (ByteString m) m) m r
--- denull = loop2 where
--- loop2 stream = do
---      e <- lift $ inspect stream
---      case e of
---        Left r         -> Return r
---        Right bsstream ->  do
---           e <- lift $ nextChunk bsstream
---           case e of
---             Left stream ->  Step $ Return $ loop2 stream
---             Right (bs, qbs) -> Step $ fmap loop2 (chunk bs >> qbs)
--- {-#INLINABLE denull #-}
 
 {- Take a builder constructed otherwise and convert it to a genuine
    streaming bytestring.  

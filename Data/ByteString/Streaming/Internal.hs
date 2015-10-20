@@ -155,17 +155,17 @@ chunk bs = consChunk bs (Empty ())
 {-# INLINE chunk #-}
 
 
-{-| An effect that results in an effectful bytestring can be viewed an effectful bytestring. 
-    Compare Streaming.mwrap. The equivalent of 
+{- | Reconceive an effect that results in an effectful bytestring as an effectful bytestring. 
+    Compare Streaming.mwrap. The closes equivalent of 
   
 >>> Streaming.wrap :: f (Stream f m r) -> Stream f m r
 
-    is here 
-
->>> \bs rest -> chunk bs >> rest :: ByteString -> ByteString m r -> ByteString m r
+    is here  @consChunk@. @mwrap@ is the smart constructor for the internal @Go@ constructor.
+-}
 mwrap :: m (ByteString m r) -> ByteString m r
 mwrap = Go
 {-# INLINE mwrap #-}
+
 -- | Construct a succession of chunks from its Church encoding (compare @GHC.Exts.build@)
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r

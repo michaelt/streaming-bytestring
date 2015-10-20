@@ -15,17 +15,15 @@ module Data.ByteString.Streaming.Char8 (
     , string
     , unlines
     , unwords
-    , unlinesIndividual
-    , unwordsIndividual
     , singleton        -- singleton :: Monad m => Char -> ByteString m () 
     , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
     , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
     , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
-    , toLazy'
+    , toLazy_
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
-    , toStrict'
+    , toStrict_
     , effects
     , drained
     , mwrap
@@ -44,11 +42,11 @@ module Data.ByteString.Streaming.Char8 (
     , append           -- append :: Monad m => ByteString m r -> ByteString m s -> ByteString m s   
     , filter           -- filter :: (Char -> Bool) -> ByteString m r -> ByteString m r 
     , head             -- head :: Monad m => ByteString m r -> m Char
-    , head'            -- head' :: Monad m => ByteString m r -> m (Of Char r)
+    , head_            -- head' :: Monad m => ByteString m r -> m (Of Char r)
     , last             -- last :: Monad m => ByteString m r -> m Char
-    , last'            -- last' :: Monad m => ByteString m r -> m (Of Char r)
+    , last_            -- last' :: Monad m => ByteString m r -> m (Of Char r)
     , null             -- null :: Monad m => ByteString m r -> m Bool 
-    , null'            -- null' :: Monad m => ByteString m r -> m (Of Bool r)
+    , nulls            -- null' :: Monad m => ByteString m r -> m (Of Bool r)
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r)) 
     , nextChar 
     
@@ -76,8 +74,6 @@ module Data.ByteString.Streaming.Char8 (
     , split            -- split :: Monad m => Char -> ByteString m r -> Stream (ByteString m) m r 
     , lines
     , words
-    , linesIndividual
-    , wordsIndividual
     , denull
     -- ** Special folds
 
@@ -104,11 +100,11 @@ module Data.ByteString.Streaming.Char8 (
     -- *  Folds, including support for `Control.Foldl`
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 
-    , fold'            -- fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
+    , fold_            -- fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
     , length
-    , length'
+    , length_
     , count
-    , count'
+    , count_
     , null_
     , readInt
     -- * I\/O with 'ByteString's
@@ -167,11 +163,11 @@ import qualified Data.ByteString.Streaming as R
 import Data.ByteString.Streaming.Internal
 
 import Data.ByteString.Streaming
-    (fromLazy, toLazy, toLazy', nextChunk, unconsChunk, 
-    fromChunks, toChunks, fromStrict, toStrict, toStrict', 
+    (fromLazy, toLazy, toLazy_, nextChunk, unconsChunk, 
+    fromChunks, toChunks, fromStrict, toStrict, toStrict_, 
     concat, distribute, effects, drained, mwrap, toStreamingByteStringWith,
     toStreamingByteString, toBuilder, concatBuilders,
-    empty, null, null', null_, length, length', append, cycle, 
+    empty, null, nulls, null_, length, length_, append, cycle, 
     take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
@@ -190,6 +186,7 @@ import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
 import Data.Functor.Compose
+import Data.Functor.Sum
 
 unpack ::  Monad m => ByteString m r ->  Stream (Of Char) m r
 unpack bs = case bs of 
@@ -219,7 +216,7 @@ unpack bs = case bs of
 -- | /O(n)/ Convert a stream of separate characters into a packed byte stream.
 pack :: Monad m => Stream (Of Char) m r -> ByteString m r
 pack  = fromChunks 
-        . mapsM (liftM (\(str :> r) -> Char8.pack str :> r) . S.toListM') 
+        . mapsM (liftM (\(str :> r) -> Char8.pack str :> r) . S.toList) 
         . chunksOf 32 
 {-# INLINABLE pack #-}
 
@@ -257,24 +254,24 @@ snoc cs = R.snoc cs . c2w
 {-# INLINE snoc #-}
 
 -- | /O(1)/ Extract the first element of a ByteString, which must be non-empty.
-head :: Monad m => ByteString m r -> m Char
-head = liftM (w2c) . R.head
-{-# INLINE head #-}
+head_ :: Monad m => ByteString m r -> m Char
+head_ = liftM (w2c) . R.head_
+{-# INLINE head_ #-}
 
 -- | /O(1)/ Extract the first element of a ByteString, which may be non-empty
-head' :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
-head' = liftM (\(m:>r) -> fmap w2c m :> r) . R.head'
-{-# INLINE head' #-}
+head :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
+head = liftM (\(m:>r) -> fmap w2c m :> r) . R.head
+{-# INLINE head #-}
 
 -- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
 -- and non-empty.
-last :: Monad m => ByteString m r -> m Char
-last = liftM (w2c) . R.last
-{-# INLINE last #-}
+last_ :: Monad m => ByteString m r -> m Char
+last_ = liftM (w2c) . R.last_
+{-# INLINE last_ #-}
 
-last' :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
-last' = liftM (\(m:>r) -> fmap (w2c) m :> r) . R.last'
-{-# INLINE last' #-}
+last :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
+last = liftM (\(m:>r) -> fmap (w2c) m :> r) . R.last
+{-# INLINE last #-}
 
 -- | /O(1)/ Extract the head and tail of a ByteString, returning Nothing
 -- if it is empty.
@@ -319,24 +316,24 @@ intersperse c = R.intersperse (c2w c)
 --
 -- -- ---------------------------------------------------------------------
 -- -- Reducing 'ByteString's
-fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b
-fold step begin done p0 = loop p0 begin
+fold_ :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b
+fold_ step begin done p0 = loop p0 begin
   where
     loop p !x = case p of
         Chunk bs bss -> loop bss $! Char8.foldl' step x bs
         Go    m    -> m >>= \p' -> loop p' x
         Empty _      -> return (done x)
-{-# INLINABLE fold #-}
+{-# INLINABLE fold_ #-}
 
 
-fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (Of b r)
-fold' step begin done p0 = loop p0 begin
+fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (Of b r)
+fold step begin done p0 = loop p0 begin
   where
     loop p !x = case p of
         Chunk bs bss -> loop bss $! Char8.foldl' step x bs
         Go    m    -> m >>= \p' -> loop p' x
         Empty r      -> return (done x :> r)
-{-# INLINABLE fold' #-}
+{-# INLINABLE fold #-}
 -- ---------------------------------------------------------------------
 -- Unfolds and replicates
 
@@ -477,10 +474,8 @@ filter p = R.filter (p . w2c)
 {- | 'lines' turns a ByteString into a connected stream of ByteStrings at
      divide at newline characters. The resulting strings do not contain newlines.
      This is the genuinely streaming 'lines' which only breaks chunks, and
-     thus never increases the use of memory. It is crucial to distinguish its
-     type from that of 'linesIndividual'
+     thus never increases the use of memory. 
 
-> linesIndividual :: Monad m => ByteString m r -> Stream (Of B.ByteString) m r
 > lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
 -}
 
@@ -502,22 +497,13 @@ unlines str =  case str of
   Delay m  -> Go (liftM unlines m)
 {-#INLINABLE unlines #-}
 
-{-| 'linesIndividual' breaks streaming by concatening the chunks between line breaks
-
-> linesIndividual = mapsM toStrict' . lines
--}
-linesIndividual :: Monad m => ByteString m r -> Stream (Of B.ByteString) m r
-linesIndividual = mapsM R.toStrict' . lines
-
--- | 
-unlinesIndividual :: Monad m => Stream (Of B.ByteString) m r -> ByteString m r 
-unlinesIndividual bss =  R.concat $ for bss (\bs -> elevate $ R.chunk bs >> singleton '\n')
-
 -- | 'words' breaks a byte stream up into a succession of byte streams 
 --   corresponding to words, breaking Chars representing white space. This is 
---   the genuinely streaming 'words' to be distinguished from
---   'wordsIndividual', which will attempt to concatenate even infinitely
---   long words like @cycle "y"@ in memory.
+--   the genuinely streaming 'words'. A function that returns individual
+--   strict bytestrings would concatenate even infinitely
+--   long words like @cycle "y"@ in memory. It is best for the user who
+--   has reflected on her materials to write `mapsM toStrict . words` or the like,
+--   if strict bytestrings are needed.
 words :: Monad m => ByteString m r -> Stream (ByteString m) m r
 words =  filtered . R.splitWith B.isSpaceWord8 
  where 
@@ -538,34 +524,6 @@ unwords :: Monad m => Stream (ByteString m) m r -> ByteString m r
 unwords = intercalate (singleton ' ')
 {-# INLINE unwords #-}
 
-{- | 'wordsIndividual' breaks a bytestream into a sequence of individual
-     @Data.ByteString.ByteString@s, delimited by Chars representing white space. 
-     It involves concatenation, of course, and is thus potentially unsafe.
-     Distinguish the types
-
-> wordsIndividual :: Monad m => ByteString m r  -> Stream (Of B.ByteString) m r
-> words :: Monad m => ByteString m r -> Stream (ByteString m) m r
-
-     The latter, genuinely streaming, 'words' can only break up chunks
-     hidden in the stream that is given; the former potentially concatenates
-
-> wordsIndividual = mapsM toStrict' . words
-
--}
-wordsIndividual :: Monad m => ByteString m r  -> Stream (Of B.ByteString) m r
-wordsIndividual = mapsM R.toStrict' . words
-
-
-{- | 'unwordsIndividual' returns to a genuine bytestream by interspersing
-     white space between a sequence of individual Data.ByteString.ByteString 
-     Distinguish the types
-
-> unwordsIndividual :: Monad m => Stream (Of B.ByteString) m r -> ByteString m r 
-> unwords :: Monad m => Stream (ByteString m) m r -> ByteString m r
-
--}
-unwordsIndividual :: Monad m => Stream (Of B.ByteString) m r -> ByteString m r 
-unwordsIndividual bss =  R.concat $ for bss (\bs -> elevate $ R.chunk bs >> singleton ' ')
 
 
 
@@ -574,13 +532,13 @@ string = chunk . B.pack . Prelude.map B.c2w
 {-# INLINE string #-}
 
 
-count :: Monad m => Char -> ByteString m r -> m Int
+count_ :: Monad m => Char -> ByteString m r -> m Int
+count_ c = R.count_ (c2w c)
+{-# INLINE count_ #-}
+
+count :: Monad m => Char -> ByteString m r -> m (Of Int r)
 count c = R.count (c2w c)
 {-# INLINE count #-}
-
-count' :: Monad m => Char -> ByteString m r -> m (Of Int r)
-count' c = R.count' (c2w c)
-{-# INLINE count' #-}
 
 nextChar :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))
 nextChar b = do 
@@ -608,21 +566,21 @@ putStrLn bs = hPut IO.stdout (snoc bs '\n')
 
 {-| This will read positive or negative Ints that require 18 or fewer characters.
 -}
-readInt :: Monad m => ByteString m r -> m (Maybe Int, ByteString m r)
-readInt = go . toStrict' . splitAt 18 where
+readInt :: Monad m => ByteString m r -> m (Compose (Of (Maybe Int)) (ByteString m) r)
+readInt = go . toStrict . splitAt 18 where
   go m = do 
     (bs :> rest) <- m
     case Char8.readInt bs of
-      Nothing -> return (Nothing, chunk bs >> rest)
+      Nothing -> return (Compose (Nothing :> (chunk bs >> rest)))
       Just (n,more) -> if B.null more 
         then do 
           e <- uncons rest
           return $ case e of
-            Left r -> (Just n, return r)
+            Left r -> Compose (Just n :> return r)
             Right (c,rest') -> if isDigit c 
-               then (Nothing, chunk bs   >> cons' c rest')
-               else (Just n,  chunk more >> cons' c rest')
-        else return (Just n,  chunk more >> rest)
+               then Compose (Nothing :> (chunk bs >> cons' c rest'))
+               else Compose (Just n :> (chunk more >> cons' c rest'))
+        else return (Compose (Just n :> (chunk more >> rest)))
 {-#INLINABLE readInt #-}
 
          -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r))

@@ -230,7 +230,7 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 
 packBytes :: Monad m => Stream (Of Word8) m r -> ByteString m r
 packBytes cs0 = do 
-  (bytes :> rest) <- lift $ SP.toListM' $ SP.splitAt 32 cs0
+  (bytes :> rest) <- lift $ SP.toList $ SP.splitAt 32 cs0
   case bytes of
     [] -> case rest of
       Return r -> Empty r

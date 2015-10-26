@@ -242,7 +242,7 @@ packBytes cs0 = do
     [] -> case rest of
       Return r -> Empty r
       Step as  -> packBytes (Step as)  -- these two pattern matches
-      Delay m -> Go $ liftM packBytes m -- should be evaded.
+      Effect m -> Go $ liftM packBytes m -- should be evaded.
     _  -> Chunk (S.packBytes bytes) (packBytes rest)
 {-#INLINABLE packBytes #-}
 
@@ -256,7 +256,7 @@ unpackBytes :: Monad m => ByteString m r ->  Stream (Of Word8) m r
 unpackBytes bss = dematerialize bss
     Return
     unpackAppendBytesLazy
-    Delay
+    Effect
   where
   unpackAppendBytesLazy :: S.ByteString -> Stream (Of Word8) m r -> Stream (Of Word8) m r
   unpackAppendBytesLazy (S.PS fp off len) xs

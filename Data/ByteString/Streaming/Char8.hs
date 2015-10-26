@@ -191,7 +191,7 @@ import Data.Functor.Sum
 unpack ::  Monad m => ByteString m r ->  Stream (Of Char) m r
 unpack bs = case bs of 
     Empty r -> Return r
-    Go m    -> Delay (liftM unpack m)
+    Go m    -> Effect (liftM unpack m)
     Chunk c cs -> unpackAppendCharsLazy c (unpack cs)
   where 
   unpackAppendCharsLazy :: B.ByteString -> Stream (Of Char) m r -> Stream (Of Char) m r
@@ -494,7 +494,7 @@ unlines str =  case str of
       Chunk "" (Empty r)   -> Empty r
       Chunk "\n" (Empty r) -> bs 
       _                    -> cons' '\n' bs
-  Delay m  -> Go (liftM unlines m)
+  Effect m  -> Go (liftM unlines m)
 {-#INLINABLE unlines #-}
 
 -- | 'words' breaks a byte stream up into a succession of byte streams 
@@ -509,8 +509,8 @@ words =  filtered . R.splitWith B.isSpaceWord8
  where 
   filtered stream = case stream of 
     Return r -> Return r
-    Delay m -> Delay (liftM filtered m)
-    Step bs -> Delay $ bs_loop bs 
+    Effect m -> Effect (liftM filtered m)
+    Step bs -> Effect $ bs_loop bs 
   bs_loop bs = case bs of
       Empty r -> return $ filtered r
       Go m ->  m >>= bs_loop

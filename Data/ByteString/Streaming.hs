@@ -288,7 +288,7 @@ toChunks bs =
   dematerialize bs
       return
       (\b mx -> Step (b:> mx))
-      Delay
+      Effect
 {-#INLINE toChunks#-}
 
 {-| /O(1)/ yield a strict 'ByteString' chunk. 
@@ -1099,7 +1099,7 @@ span p = break (not . p)
 --
 splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r
 splitWith _ (Empty r)      = Return r
-splitWith p (Go m)         = Delay $ liftM (splitWith p) m
+splitWith p (Go m)         = Effect $ liftM (splitWith p) m
 splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
   where 
 -- comb :: [P.ByteString] -> [P.ByteString] -> ByteString -> [ByteString]
@@ -1108,7 +1108,7 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
                                               (Empty (Return r)) 
                                               (s:acc) 
   comb acc [s] (Chunk c cs) = comb (s:acc) (S.splitWith p c) cs
-  comb acc b (Go m)         = Delay (liftM (comb acc b) m)
+  comb acc b (Go m)         = Effect (liftM (comb acc b) m)
   comb acc (s:ss) cs        = Step $ L.foldl' (flip Chunk)  
                                               (Empty (comb [] ss cs)) 
                                               (s:acc)
@@ -1138,13 +1138,13 @@ split w = loop
   where
   loop !x = case x of
     Empty r      -> Return r
-    Go m         -> Delay $ liftM loop m
+    Go m         -> Effect $ liftM loop m
     Chunk c0 cs0 -> comb [] (S.split w c0) cs0
   comb !acc [] (Empty r)       = Step $ revChunks acc (Return r)
   comb acc [] (Chunk c cs)     = comb acc (S.split w c) cs
   comb !acc (s:[]) (Empty r)   = Step $ revChunks (s:acc) (Return r)
   comb acc (s:[]) (Chunk c cs) = comb (s:acc) (S.split w c) cs
-  comb acc b (Go m)            = Delay (liftM (comb acc b) m)
+  comb acc b (Go m)            = Effect (liftM (comb acc b) m)
   comb acc (s:ss) cs           = Step $ revChunks (s:acc) (comb [] ss cs)
 {-# INLINABLE split #-}
 
@@ -1164,7 +1164,7 @@ group :: Monad m => ByteString m r -> Stream (ByteString m) m r
 group = go
   where
   go (Empty r)         = Return r
-  go (Go m)            = Delay $ liftM go m
+  go (Go m)            = Effect $ liftM go m
   go (Chunk c cs)
     | S.length c == 1  = Step $ to [c] (S.unsafeHead c) cs
     | otherwise        = Step $ to [S.unsafeTake 1 c] (S.unsafeHead c)
@@ -1207,14 +1207,14 @@ group = go
 -- argument between each element of the list.
 intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r
 intercalate _ (Return r) = Empty r
-intercalate s (Delay m) = Go $ liftM (intercalate s) m
+intercalate s (Effect m) = Go $ liftM (intercalate s) m
 intercalate s (Step bs0) = do  -- this isn't quite right
   ls <- bs0
   s 
   intercalate s ls
  -- where
  --  loop (Return r) =  Empty r -- concat . (L.intersperse s)
- --  loop (Delay m) = Go $ liftM loop m
+ --  loop (Effect m) = Go $ liftM loop m
  --  loop (Step bs) = do
  --    ls <- bs
  --    case ls of
@@ -1617,7 +1617,7 @@ zipWithStream op zs = loop zs
     loop a@(x:xs)  ls = case ls of
       Return r -> Return r
       Step fls -> Step $ fmap (loop xs) (op x fls)
-      Delay mls -> Delay $ liftM (loop a) mls
+      Effect mls -> Effect $ liftM (loop a) mls
 
 {-#INLINABLE zipWithStream #-}
 
@@ -1675,7 +1675,7 @@ concatBuilders p = builder $ \bstep r -> do
   case p of
     Return _          -> runBuilderWith mempty bstep r
     Step (b :> rest)  -> runBuilderWith (b `mappend` concatBuilders rest) bstep r 
-    Delay m            -> m >>= \p' -> runBuilderWith (concatBuilders p') bstep r
+    Effect m            -> m >>= \p' -> runBuilderWith (concatBuilders p') bstep r
 {-#INLINABLE concatBuilders #-}
 
 

@@ -1477,6 +1477,8 @@ hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 
 {-| Read an entire file into a chunked 'ByteString IO ()'.
     The Handle will be held open until EOF is encountered.
+    The block governed by 'Control.Monad.Trans.Resource.runResourceT'
+    will end with the closing of any handles opened.
 
 >>> :set -XOverloadedStrings
 >>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
@@ -1487,7 +1489,8 @@ readFile :: MonadResource m => FilePath -> ByteString m ()
 readFile f = bracketByteString (openBinaryFile f ReadMode) hClose hGetContents
 {-#INLINE readFile #-}
 
-{-| Write a 'ByteString' to a file.
+{-| Write a 'ByteString' to a file. Use 'Control.Monad.Trans.ResourceT.runResourceT'
+    to ensure that the handle is closed. 
 
 >>> :set -XOverloadedStrings
 >>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
@@ -1503,7 +1506,8 @@ writeFile f str = do
   return r
 {-# INLINE writeFile #-}
 
-{-| Append a 'ByteString' to a file.
+{-| Append a 'ByteString' to a file. Use 'Control.Monad.Trans.ResourceT.runResourceT'
+    to ensure that the handle is closed. 
 
 >>> runResourceT $ Q.writeFile "hello.txt" "Hello world.\nGoodbye world.\n"
 >>> runResourceT $ Q.stdout $  Q.readFile "hello.txt"

@@ -314,9 +314,9 @@ toStrict_ = liftM S.concat . SP.toList_ . toChunks
 
 {-| /O(n)/ Convert a monadic byte stream into a single strict 'ByteString',
    retaining the return value of the original pair. This operation is
-   for use with 'mapsM'.
+   for use with 'mapped'.
 
-> mapsM R.toStrict :: Monad m => Stream (ByteString m) m r -> Stream (Of ByteString) m r 
+> mapped R.toStrict :: Monad m => Stream (ByteString m) m r -> Stream (Of ByteString) m r 
  
    It is subject to all the objections one makes to Data.ByteString.Lazy 'toStrict'; 
    all of these are devastating. 
@@ -364,9 +364,9 @@ toLazy_ bs = dematerialize bs
     followed by the memory of the succession of bytes. 
 
     Because one preserves the return value, @toLazy@ is a suitable argument
-    for 'Streaming.mapsM'
+    for 'Streaming.mapped'
 
->   S.mapsM Q.toLazy :: Stream (ByteString m) m r -> Stream (Of L.ByteString) m r
+>   S.mapped Q.toLazy :: Stream (ByteString m) m r -> Stream (Of L.ByteString) m r
 
 >>> Q.toLazy "hello"
 "hello" :> ()
@@ -413,7 +413,7 @@ null_ (Chunk bs rest) = if S.null bs
 
 -}
 denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r 
-denull = hoist (run . maps effects) . separate . mapsM nulls
+denull = hoist (run . maps effects) . separate . mapped nulls
 {-#INLINE denull #-}
 
 {- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
@@ -423,7 +423,7 @@ denull = hoist (run . maps effects) . separate . mapsM nulls
 False :> ()
 >>> Q.null ""
 True :> ()
->>> S.print $ mapsM R.null $ Q.lines "yours,\nMeredith"
+>>> S.print $ mapped R.null $ Q.lines "yours,\nMeredith"
 False
 False
 
@@ -446,11 +446,11 @@ null (Chunk bs rest) = if S.null bs
     There are many ways to remove null bytestrings from a 
     @Stream (ByteString m) m r@ (besides using @denull@). If we pass next to
 
->>> mapsM nulls bs :: Stream (Sum (ByteString m) (ByteString m)) m r
+>>> mapped nulls bs :: Stream (Sum (ByteString m) (ByteString m)) m r
 
     then can then apply @Streaming.separate@ to get
 
->>> separate (mapsM nulls bs) :: Stream (ByteString m) (Stream (ByteString m) m) r
+>>> separate (mapped nulls bs) :: Stream (ByteString m) (Stream (ByteString m) m) r
 
     The inner monad is now made of the empty bytestrings; we act on this 
     with @hoist@ , considering that 
@@ -461,7 +461,7 @@ Q.effects . Q.concat
 
     we have 
 
->>> hoist (Q.effects . Q.concat) . separate . mapsM Q.nulls
+>>> hoist (Q.effects . Q.concat) . separate . mapped Q.nulls
   :: Monad n =>  Stream (Q.ByteString n) n b -> Stream (Q.ByteString n) n b
 
 
@@ -486,7 +486,7 @@ length_  = liftM (\(n:> _) -> n) . foldlChunks (\n c -> n + fromIntegral (S.leng
 
 >>> Q.length "one\ntwo\three\nfour\nfive\n"
 23 :> ()
->>> S.print $ S.take 3 $ mapsM Q.length $ Q.lines "one\ntwo\three\nfour\nfive\n" 
+>>> S.print $ S.take 3 $ mapped Q.length $ Q.lines "one\ntwo\three\nfour\nfive\n" 
 3
 8
 4
@@ -1475,28 +1475,19 @@ hGetNonBlocking :: MonadIO m => Handle -> Int -> ByteString m ()
 hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 {-#INLINE hGetNonBlocking #-}
 
-{-| Read an entire file into a chunked 'ByteString IO ()'.
-    The Handle will be held open until EOF is encountered.
-    The block governed by 'Control.Monad.Trans.Resource.runResourceT'
-    will end with the closing of any handles opened.
-
->>> :set -XOverloadedStrings
->>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
->>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
-  -}
-
-readFile :: MonadResource m => FilePath -> ByteString m ()
-readFile f = bracketByteString (openBinaryFile f ReadMode) hClose hGetContents
-{-#INLINE readFile #-}
-
 {-| Write a 'ByteString' to a file. Use 'Control.Monad.Trans.ResourceT.runResourceT'
     to ensure that the handle is closed. 
 
 >>> :set -XOverloadedStrings
->>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
->>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
-hello world
-goodbye world
+>>> runResourceT $ Q.writeFile "hello.txt" "Hello world.\nGoodbye world.\n" 
+>>> :! cat "hello.txt"
+Hello world.
+Goodbye world.
+>>> runResourceT $ Q.writeFile "hello2.txt" $ Q.readFile "hello.txt"
+>>> :! cat hello2.txt 
+Hello world.
+Goodbye world.
+
  -}
 writeFile :: MonadResource m => FilePath -> ByteString m r -> m r
 writeFile f str = do
@@ -1506,11 +1497,30 @@ writeFile f str = do
   return r
 {-# INLINE writeFile #-}
 
+{-| Read an entire file into a chunked 'ByteString IO ()'.
+    The Handle will be held open until EOF is encountered.
+    The block governed by 'Control.Monad.Trans.Resource.runResourceT'
+    will end with the closing of any handles opened.
+
+>>> :! cat hello.txt
+Hello world.
+Goodbye world. 
+>>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
+Hello world.
+Goodbye world. 
+  -}
+
+readFile :: MonadResource m => FilePath -> ByteString m ()
+readFile f = bracketByteString (openBinaryFile f ReadMode) hClose hGetContents
+{-#INLINE readFile #-}
+
+
+
 {-| Append a 'ByteString' to a file. Use 'Control.Monad.Trans.ResourceT.runResourceT'
     to ensure that the handle is closed. 
 
 >>> runResourceT $ Q.writeFile "hello.txt" "Hello world.\nGoodbye world.\n"
->>> runResourceT $ Q.stdout $  Q.readFile "hello.txt"
+>>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
 Hello world.
 Goodbye world.
 >>> runResourceT $ Q.appendFile "hello.txt" "sincerely yours,\nArthur\n"

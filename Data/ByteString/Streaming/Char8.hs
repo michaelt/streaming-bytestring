@@ -216,7 +216,7 @@ unpack bs = case bs of
 -- | /O(n)/ Convert a stream of separate characters into a packed byte stream.
 pack :: Monad m => Stream (Of Char) m r -> ByteString m r
 pack  = fromChunks 
-        . mapsM (liftM (\(str :> r) -> Char8.pack str :> r) . S.toList) 
+        . mapped (liftM (\(str :> r) -> Char8.pack str :> r) . S.toList) 
         . chunksOf 32 
 {-# INLINABLE pack #-}
 
@@ -502,7 +502,7 @@ unlines str =  case str of
 --   the genuinely streaming 'words'. A function that returns individual
 --   strict bytestrings would concatenate even infinitely
 --   long words like @cycle "y"@ in memory. It is best for the user who
---   has reflected on her materials to write `mapsM toStrict . words` or the like,
+--   has reflected on her materials to write `mapped toStrict . words` or the like,
 --   if strict bytestrings are needed.
 words :: Monad m => ByteString m r -> Stream (ByteString m) m r
 words =  filtered . R.splitWith B.isSpaceWord8 

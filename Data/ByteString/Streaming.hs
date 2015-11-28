@@ -169,6 +169,7 @@ module Data.ByteString.Streaming (
     -- * Etc.
     , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
     , distribute       -- distribute :: ByteString (t m) a -> t (ByteString m) a 
+
   ) where
 
 import Prelude hiding
@@ -207,6 +208,8 @@ import Foreign.Storable
 import Foreign.Ptr
 import Data.Functor.Compose
 import Data.Functor.Sum
+import Control.Monad.Trans.Resource
+
 -- | /O(n)/ Concatenate a stream of byte streams.
 concat :: Monad m => Stream (ByteString m) m r -> ByteString m r
 concat x = destroy x join Go Empty 
@@ -1104,16 +1107,19 @@ splitWith p (Chunk c0 cs0) = comb [] (S.splitWith p c0) cs0
   where 
 -- comb :: [P.ByteString] -> [P.ByteString] -> ByteString -> [ByteString]
 --  comb acc (s:[]) (Empty r)    = Step (revChunks (s:acc) (Return r))
-  comb acc [s] (Empty r)    = Step $ L.foldl' (flip Chunk) 
-                                              (Empty (Return r)) 
-                                              (s:acc) 
-  comb acc [s] (Chunk c cs) = comb (s:acc) (S.splitWith p c) cs
-  comb acc b (Go m)         = Effect (liftM (comb acc b) m)
-  comb acc (s:ss) cs        = Step $ L.foldl' (flip Chunk)  
-                                              (Empty (comb [] ss cs)) 
-                                              (s:acc)
-                                              
---  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
+  comb acc [s]    (Empty r)    = Step $ L.foldl' (flip Chunk) 
+                                                 (Empty (Return r)) 
+                                                 (s:acc) 
+  comb acc [s]    (Chunk c cs) = comb (s:acc) (S.splitWith p c) cs
+  comb acc b      (Go m)       = Effect (liftM (comb acc b) m)
+  comb acc (s:ss) cs           = Step $ L.foldl' (flip Chunk)  
+                                                 (Empty (comb [] ss cs)) 
+                                                 (s:acc)
+  comb acc []  (Empty r)    = Step $ L.foldl' (flip Chunk) 
+                                                 (Empty (Return r)) 
+                                                 acc 
+  comb acc []  (Chunk c cs) = comb acc (S.splitWith p c) cs                             
+ --  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
 
 {-# INLINABLE splitWith #-}
 
@@ -1469,29 +1475,53 @@ hGetNonBlocking :: MonadIO m => Handle -> Int -> ByteString m ()
 hGetNonBlocking = hGetNonBlockingN defaultChunkSize
 {-#INLINE hGetNonBlocking #-}
 
--- | Read an entire file into a chunked 'ByteString IO ()'.
--- The Handle will be held open until EOF is encountered.
---
-readFile ::  MonadIO m => FilePath -> ByteString m ()
-readFile f = Go $ liftM hGetContents (liftIO (openBinaryFile f ReadMode))
+{-| Read an entire file into a chunked 'ByteString IO ()'.
+    The Handle will be held open until EOF is encountered.
+
+>>> :set -XOverloadedStrings
+>>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
+>>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
+  -}
+
+readFile :: MonadResource m => FilePath -> ByteString m ()
+readFile f = bracketByteString (openBinaryFile f ReadMode) hClose hGetContents
 {-#INLINE readFile #-}
 
--- | Write a 'ByteString' to a file.
---
-writeFile :: FilePath -> ByteString IO r -> IO r
-writeFile f txt = bracket
-    (openBinaryFile f WriteMode)
-    hClose
-    (\hdl -> hPut hdl txt)
+{-| Write a 'ByteString' to a file.
+
+>>> :set -XOverloadedStrings
+>>> runResourceT $ Q.writeFile "hello.txt" "hello world\ngoodbye world\n" 
+>>> runResourceT $ Q.stdout $ Q.readFile "hello.txt"
+hello world
+goodbye world
+ -}
+writeFile :: MonadResource m => FilePath -> ByteString m r -> m r
+writeFile f str = do
+  (key, handle) <- allocate (openBinaryFile f WriteMode) hClose
+  r <- hPut handle str
+  release key
+  return r
 {-# INLINE writeFile #-}
 
--- | Append a 'ByteString' to a file.
---
-appendFile :: FilePath -> ByteString IO r -> IO r
-appendFile f txt = bracket
-    (openBinaryFile f AppendMode)
-    hClose
-    (\hdl -> hPut hdl txt)
+{-| Append a 'ByteString' to a file.
+
+>>> runResourceT $ Q.writeFile "hello.txt" "Hello world.\nGoodbye world.\n"
+>>> runResourceT $ Q.stdout $  Q.readFile "hello.txt"
+Hello world.
+Goodbye world.
+>>> runResourceT $ Q.appendFile "hello.txt" "sincerely yours,\nArthur\n"
+>>> runResourceT $ Q.stdout $  Q.readFile "hello.txt"
+Hello world.
+Goodbye world.
+sincerely yours,
+Arthur
+  -}
+appendFile :: MonadResource m => FilePath -> ByteString m r -> m r
+appendFile f str = do
+  (key, handle) <- allocate (openBinaryFile f AppendMode) hClose
+  r <- hPut handle str
+  release key
+  return r
 {-# INLINE appendFile #-}
 
 -- | getContents. Equivalent to hGetContents stdin. Will read /lazily/

@@ -1,6 +1,7 @@
-{-# LANGUAGE CPP, BangPatterns #-}
-{-#LANGUAGE RankNTypes, GADTs #-}
+{-# LANGUAGE CPP, BangPatterns, RankNTypes, GADTs #-}
 {-# LANGUAGE UnliftedFFITypes, MagicHash, UnboxedTuples #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-} 
+-- for resourcet etc.
 module Data.ByteString.Streaming.Internal (
    ByteString (..) 
    , consChunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
@@ -26,6 +27,9 @@ module Data.ByteString.Streaming.Internal (
    , reread
    , inlinePerformIO
    , unsafeLast
+   
+   -- * ResourceT help
+   , bracketByteString
   ) where
 
 import Prelude hiding
@@ -60,6 +64,9 @@ import System.IO.Unsafe
 import GHC.Base                 (realWorld#,unsafeChr)
 import GHC.IO                   (IO(IO))
 
+import Control.Monad.Base
+import Control.Monad.Trans.Resource
+import Control.Monad.Catch (MonadCatch (..))
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
 --
@@ -133,9 +140,45 @@ instance (Monoid r, Monad m) => Monoid (ByteString m r) where
   {-# INLINE mempty #-}
   mappend = liftM2 mappend
   {-# INLINE mappend #-}
-      
--- data Word8_ r = Word8_ {-#UNPACK#-} !Word8 r 
--- This might be preferable to (Of Word8 r), but the present approach is simpler.
+
+instance (MonadBase b m) => MonadBase b (ByteString m) where
+  liftBase  = mwrap . fmap return . liftBase
+  {-#INLINE liftBase #-}
+
+instance (MonadThrow m) => MonadThrow (ByteString m) where
+  throwM = lift . throwM 
+  {-#INLINE throwM #-}
+
+
+instance (MonadCatch m) => MonadCatch (ByteString m) where
+  catch str f = go str
+    where
+    go p = case p of
+      Chunk bs rest  -> Chunk bs (go rest)
+      Empty  r       -> Empty r
+      Go  m          -> Go (catch (do
+          p' <- m
+          return (go p'))  
+       (\e -> return (f e)) )
+  {-#INLINABLE catch #-}
+     
+instance (MonadResource m) => MonadResource (ByteString m) where
+  liftResourceT = lift . liftResourceT
+  {-#INLINE liftResourceT #-}
+
+bracketByteString :: (MonadResource m) =>
+       IO a -> (a -> IO ()) -> (a -> ByteString m b) -> ByteString m b
+bracketByteString alloc free inside = do
+        (key, seed) <- lift (allocate alloc free)
+        clean key (inside seed)
+  where
+    clean key = loop where
+      loop str = case str of 
+        Empty r        -> Go (release key >> return (Empty r))
+        Go m           -> Go (liftM loop m)
+        Chunk bs rest  -> Chunk bs (loop rest)
+{-#INLINABLE bracketByteString #-}
+
 
 data SPEC = SPEC | SPEC2
 {-# ANN type SPEC ForceSpecConstr #-}

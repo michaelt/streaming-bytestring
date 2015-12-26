@@ -25,6 +25,7 @@ module Data.ByteString.Streaming.Char8 (
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
     , toStrict_
     , effects
+    , copy
     , drained
     , mwrap
 

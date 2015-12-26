@@ -62,10 +62,13 @@ module Data.ByteString.Streaming (
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
-    , toStrict_        -- toStrict' :: Monad m => ByteString m r -> m (Of ByteString r) 
+    , toStrict_        -- toStrict_ :: Monad m => ByteString m r -> m (Of ByteString r) 
     , effects
+    , copy
     , drained
     , mwrap
+    , distribute       -- distribute :: ByteString (t m) a -> t (ByteString m) a 
+    
     
     -- * Transforming ByteStrings
     , map              -- map :: Monad m => (Word8 -> Word8) -> ByteString m r -> ByteString m r 
@@ -168,7 +171,6 @@ module Data.ByteString.Streaming (
 --    , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
     -- * Etc.
     , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
-    , distribute       -- distribute :: ByteString (t m) a -> t (ByteString m) a 
 
   ) where
 

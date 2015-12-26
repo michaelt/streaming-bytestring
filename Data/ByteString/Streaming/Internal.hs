@@ -27,6 +27,7 @@ module Data.ByteString.Streaming.Internal (
    , reread
    , inlinePerformIO
    , unsafeLast
+   , copy
    
    -- * ResourceT help
    , bracketByteString
@@ -405,3 +406,56 @@ reread step s = loop where
       Nothing -> return (Empty ())
       Just a  -> return (Chunk a loop)
 {-# INLINEABLE reread #-}
+
+{-| Make the information in a bytestring available to more than one eliminating fold, e.g.
+
+>>>  Q.count 'l' $ Q.count 'o' $ Q.copy $ "hello\nworld"
+3 :> (2 :> ())
+
+>>> Q.length $ Q.count 'l' $ Q.count 'o' $ Q.copy $ Q.copy "hello\nworld"
+11 :> (3 :> (2 :> ()))
+
+>>> runResourceT $ Q.writeFile "hello2.txt" $ Q.writeFile "hello1.txt" $ Q.copy $ "hello\nworld\n"
+>>> :! cat hello2.txt
+hello
+world
+>>> :! cat hello1.txt
+hello
+world
+
+    This sort of manipulation could as well be acheived by combining folds - using
+    @Control.Foldl@ for example. But any sort of manipulation can be involved in
+    the fold.  Here are a couple of trivial complications involving splitting by lines:
+
+>>> let doubleLines = Q.unlines . maps (<* Q.chunk "\n" ) . Q.lines
+>>> let emphasize = Q.unlines . maps (<* Q.chunk "!" ) . Q.lines
+>>> runResourceT $ Q.writeFile "hello2.txt" $ emphasize $ Q.writeFile "hello1.txt" $ doubleLines $ Q.copy $ "hello\nworld"
+>>> :! cat hello2.txt
+hello!
+world!
+>>> :! cat hello1.txt
+hello
+
+world
+
+    As with the parallel operations in @Streaming.Prelude@, we have
+
+> Q.effects . Q.copy       = id
+> hoist Q.effects . Q.copy = id
+
+   The duplication does not by itself involve the copying of bytestring chunks;
+   it just makes two references to each chunk as it arises. This does, however
+   double the number of constructors associated with each chunk.
+
+-}
+
+copy
+  :: Monad m =>
+     ByteString m r -> ByteString (ByteString m) r
+copy = loop where
+  loop str = case str of
+    Empty r         -> Empty r
+    Go m            -> Go (liftM loop (lift m))
+    Chunk bs rest   -> Chunk bs (Go (Chunk bs (Empty (loop rest))))
+
+{-# INLINABLE copy #-}

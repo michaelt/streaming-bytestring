@@ -188,6 +188,7 @@ import Foreign.Ptr
 import Foreign.Storable
 import Data.Functor.Compose
 import Data.Functor.Sum
+import qualified Data.List as L
 
 unpack ::  Monad m => ByteString m r ->  Stream (Of Char) m r
 unpack bs = case bs of 
@@ -481,21 +482,37 @@ filter p = R.filter (p . w2c)
 -}
 
 lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
-lines = R.split 10
-{-#INLINE lines #-}
+-- lines = loop
+--   where
+--   loop !x = case x of
+--     Empty r      -> Return r
+--     Go m         -> Effect $ liftM loop m
+--     Chunk c0 cs0 -> comb [] (B.split 10 c0) cs0
+lines (Empty r) = Return r
+lines (Go m)    = Effect $ liftM lines m
+lines (Chunk c0 cs0) = comb [] (B.split 10 c0) cs0 where
+  comb !acc [] (Empty r)       = Step (revChunks acc (Return r))
+  comb acc [] (Chunk c cs)     = comb acc (B.split 10 c) cs
+  comb acc (s:[]) (Empty r)    = Step (revChunks (s:acc) (Return r))
+  comb acc (s:[]) (Chunk c cs) = comb (s:acc) (B.split 10 c) cs
+  comb acc b (Go m)            = Effect (liftM (comb acc b) m)
+  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
+  revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
+{-#INLINABLE lines #-}
 
 -- | The 'unlines' function restores line breaks between layers 
 unlines :: Monad m => Stream (ByteString m) m r ->  ByteString m r
-unlines str =  case str of
-  Return r -> Empty r
-  Step bstr   -> do 
-    st <- bstr 
-    let bs = unlines st
-    case bs of 
-      Chunk "" (Empty r)   -> Empty r
-      Chunk "\n" (Empty r) -> bs 
-      _                    -> cons' '\n' bs
-  Effect m  -> Go (liftM unlines m)
+unlines = loop where
+  loop str =  case str of
+    Return r -> Empty r
+    Step bstr   -> do 
+      st <- bstr 
+      let bs = unlines st
+      case bs of 
+        Chunk "" (Empty r)   -> Empty r
+        Chunk "\n" (Empty r) -> bs 
+        _                    -> cons' '\n' bs
+    Effect m  -> Go (liftM unlines m)
 {-#INLINABLE unlines #-}
 
 -- | 'words' breaks a byte stream up into a succession of byte streams 

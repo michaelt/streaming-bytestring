@@ -1158,7 +1158,7 @@ split w = loop
 
 
 --
--- | The 'group' function take`5s a ByteString and returns a list of
+-- | The 'group' function takes a ByteString and returns a list of
 -- ByteStrings such that the concatenation of the result is equal to the
 -- argument.  Moreover, each sublist in the result contains only equal
 -- elements.  For example,

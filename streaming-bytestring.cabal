@@ -6,36 +6,9 @@ description:         This is an implementation of effectful, memory-constrained
                      bytestrings (byte streams) and functions for streaming 
                      bytestring manipulation, adequate for non-lazy-io. 
                      .
-                     Interoperation with @pipes@ uses this isomorphism:
-                     . 
-                     > Streaming.unfoldrChunks Pipes.next :: Monad m => Producer ByteString m r -> ByteString m r
-                     > Pipes.unfoldr Streaming.nextChunk  :: Monad m => ByteString m r -> Producer ByteString m r
-                     .
-                     Interoperation with @io-streams@ is thus:
-                     .
-                     > IOStreams.unfoldM Streaming.unconsChunk :: ByteString IO () -> IO (InputStream ByteString)
-                     > Streaming.reread IOStreams.read         :: InputStream ByteString -> ByteString IO ()
-                     .
-                     and similarly for other rational streaming io libraries. 
-                     .
-                     Problems and questions about the library can be put as issues on 
-                     the github page, or mailed to the 
-                     <https://groups.google.com/forum/#!forum/haskell-pipes pipes list>.
-                     .
-                     A tutorial module is in the works; 
-                     <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here>,
-                     for the moment, 
-                     is a sequence of simplified implementations of familiar shell utilities.  
-                     The same programs are implemented at the end of the excellent
-                     <http://hackage.haskell.org/package/io-streams-1.3.2.0/docs/System-IO-Streams-Tutorial.html io-streams tutorial>.
-                     It is generally much simpler; in some case simpler than what
-                     you would write with lazy bytestrings. 
-                     <https://gist.github.com/michaelt/2dcea1ba32562c091357 Here>
-                     is a simple GET request that returns a byte stream.
-                     .
-                     The implementation is idiot-simple; it follows the
+                     The implementation follows the
                      details of @Data.ByteString.Lazy@ and @Data.ByteString.Lazy.Char8@
-                     as far as is possible, replacing the lazy bytestring type:
+                     in unrelenting detail, replacing the lazy bytestring type:
                      .
                      > data ByteString     = Empty   | Chunk Strict.ByteString ByteString
                      .
@@ -43,7 +16,7 @@ description:         This is an implementation of effectful, memory-constrained
                      .
                      > data ByteString m r = Empty r | Chunk Strict.ByteString (ByteString m r) | Go (m (ByteString m r))
                      .
-                     (Constructors are necessarily hidden in internal modules in both cases.) 
+                     (Constructors are necessarily hidden in internal modules in both the @Lazy@ and the @Streaming@.) 
                      .
                      That's it. As a lazy bytestring is implemented internally 
                      by a sort of list of strict bytestring chunks, a streaming bytestring is 
@@ -64,7 +37,7 @@ description:         This is an implementation of effectful, memory-constrained
                        The default I/O chunk size is 32k, which should be good in most circumstances.\"
                      .
                      ... which is very much the idea of this library: the default chunk size for
-                     'hGetContents' and the like follows @Data.ByteString.Lazy@ and operations
+                     'hGetContents' and the like follows @Data.ByteString.Lazy@; operations
                      like @lines@ and @append@ and so on are tailored not to increase chunk size. 
                      .
                      The present library is thus nothing but /lazy bytestring done right/. 
@@ -117,7 +90,7 @@ description:         This is an implementation of effectful, memory-constrained
                      These concepts belong to the ABCs of streaming; @lines@ is just
                      a textbook example, and it is of course handled correctly in 
                      @Data.ByteString.Lazy@.
-                     But the concepts are catastrophically mishandled in the streaming io libraries 
+                     But the concepts are /catastrophically mishandled/ in /all/ streaming io libraries 
                      other than pipes. Already the @enumerator@ and @iteratee@ libraries
                      were completely defeated by @lines@: 
                      see e.g. the @enumerator@ implementation of 
@@ -125,14 +98,13 @@ description:         This is an implementation of effectful, memory-constrained
                      This will concatenate strict text forever, if that's what is coming
                      in.  The rot spreads from there. 
                      It is just a fact that in all of the general streaming io 
-                     frameworks other than pipes, 
-                     it becomes torture to express elementary distinctions 
-                     that are transparently
-                     and immediately contained in any idea of streaming whatsoever. 
+                     frameworks other than pipes,it becomes torture to express elementary distinctions 
+                     that are transparently and immediately contained in any 
+                     idea of streaming whatsoever. 
                      .
-                     Though we barely alter signatures in @Data.ByteString.Lazy@ 
-                     more than is required  by the types, 
-                     the point of view that emerges is very much that of
+                     Though, as was said above, we barely alter signatures in @Data.ByteString.Lazy@ 
+                     more than is required by the types, the point of view that emerges 
+                     is very much that of
                      @pipes-bytestring@ and @pipes-group@. In particular
                      we have these correspondences:
                      .
@@ -149,13 +121,33 @@ description:         This is an implementation of effectful, memory-constrained
                      where the @Stream@ type expresses the sequencing of @ByteString m _@ layers
                      with the usual \'free monad\' sequencing. 
                      .
-                     If you are unfamiliar with this
-                     way of structuring material you might take a look at the tutorial for 
-                     <http://hackage.haskell.org/package/pipes-group-1.0.2/docs/Pipes-Group-Tutorial.html pipes-group>
-                     and the examples in the documentation for the streaming library. See also
-                     <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 simple implementations> 
-                     of the shell-like examples mentioned above. Or, again, put a question on
-                     the issues page or to the pipes list.
+                     Interoperation with @pipes-bytestring@ uses this isomorphism:
+                     . 
+                     > Streaming.ByteString.unfoldrChunks Pipes.next :: Monad m => Producer ByteString m r -> ByteString m r
+                     > Pipes.unfoldr Streaming.ByteString.nextChunk  :: Monad m => ByteString m r -> Producer ByteString m r
+                     .
+                     Interoperation with @io-streams@ is thus:
+                     .
+                     > IOStreams.unfoldM Streaming.ByteString.unconsChunk :: ByteString IO () -> IO (InputStream ByteString)
+                     > Streaming.ByteString.reread IOStreams.read         :: InputStream ByteString -> ByteString IO ()
+                     .
+                     and similarly for other rational streaming io libraries. 
+                     .
+                     Problems and questions about the library can be put as issues on 
+                     the github page, or mailed to the 
+                     <https://groups.google.com/forum/#!forum/haskell-pipes pipes list>.
+                     .
+                     A tutorial module is in the works; 
+                     <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here>,
+                     for the moment, 
+                     is a sequence of simplified implementations of familiar shell utilities.  
+                     The same programs are implemented at the end of the excellent
+                       <http://hackage.haskell.org/package/io-streams-1.3.2.0/docs/System-IO-Streams-Tutorial.html io-streams tutorial>.
+                       It is generally much simpler; in some case simpler than what
+                       you would write with lazy bytestrings. 
+                       <https://gist.github.com/michaelt/2dcea1ba32562c091357 Here>
+                       is a simple GET request that returns a byte stream.
+                       .
 
                     
 license:             BSD3

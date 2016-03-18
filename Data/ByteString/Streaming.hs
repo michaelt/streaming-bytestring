@@ -99,6 +99,7 @@ module Data.ByteString.Streaming (
     , break            -- break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
     , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
+    , groupBy
     , span             -- span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , splitAt          -- splitAt :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m (ByteString m r) 
     , splitWith        -- splitWith :: Monad m => (Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
@@ -1191,6 +1192,33 @@ group = go
                                     (S.unsafeTake n c : acc)
                                     (Empty (go (Chunk (S.unsafeDrop n c) cs)))
 
+{-#INLINABLE group #-}
+
+-- | The 'groupBy' function is a generalized version of 'group'.
+groupBy :: Monad m => (Word8 -> Word8 -> Bool) -> ByteString m r -> Stream (ByteString m) m r
+groupBy rel = go
+  where
+  go (Empty r)         = Return r
+  go (Go m)            = Effect $ liftM go m
+  go (Chunk c cs)
+    | S.length c == 1  = Step $ to [c] (S.unsafeHead c) cs
+    | otherwise        = Step $ to [S.unsafeTake 1 c] (S.unsafeHead c)
+                                     (Chunk (S.unsafeTail c) cs)
+
+  to acc !_ (Empty r)        = revNonEmptyChunks 
+                                     acc  
+                                     (Empty (Return r))
+  to acc !w (Chunk c cs) =
+    case findIndexOrEnd (not . rel w) c of
+      0                    -> revNonEmptyChunks 
+                                    acc 
+                                    (Empty (go (Chunk c cs)))
+      n | n == S.length c  -> to (S.unsafeTake n c : acc) w cs
+        | otherwise        -> revNonEmptyChunks 
+                                    (S.unsafeTake n c : acc)
+                                    (Empty (go (Chunk (S.unsafeDrop n c) cs)))
+{-#INLINABLE groupBy #-}
+                                    
 -- -- | The 'groupBy' function is the non-overloaded version of 'group'.
 -- --
 -- groupBy :: (Word8 -> Word8 -> Bool) -> ByteString -> [ByteString]
@@ -1414,7 +1442,7 @@ hGetN _ h n = liftIO $ illegalBufferSize h "hGet" n  -- <--- REPAIR !!!
 -- | hGetNonBlockingN is similar to 'hGetContentsN', except that it will never block
 -- waiting for data to become available, instead it returns only whatever data
 -- is available. Chunks are read on demand, in @k@-sized chunks.
---
+
 hGetNonBlockingN :: MonadIO m => Int -> Handle -> Int ->  ByteString m ()
 hGetNonBlockingN k h n | n > 0 = readChunks n
   where

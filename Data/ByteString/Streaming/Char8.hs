@@ -65,6 +65,7 @@ module Data.ByteString.Streaming.Char8 (
     , break            -- break :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
     , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
+    , groupBy
     , span             -- span :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , splitAt          -- splitAt :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m (ByteString m r) 
     , splitWith        -- splitWith :: Monad m => (Char -> Bool) -> ByteString m r -> Stream (ByteString m) m r 
@@ -274,6 +275,10 @@ last_ = liftM (w2c) . R.last_
 last :: Monad m => ByteString m r -> m (Of (Maybe Char) r)
 last = liftM (\(m:>r) -> fmap (w2c) m :> r) . R.last
 {-# INLINE last #-}
+
+groupBy :: Monad m => (Char -> Char -> Bool) -> ByteString m r -> Stream (ByteString m) m r
+groupBy rel = R.groupBy (\w w' -> rel (w2c w) (w2c w'))
+{-#INLINE groupBy #-}
 
 -- | /O(1)/ Extract the head and tail of a ByteString, returning Nothing
 -- if it is empty.

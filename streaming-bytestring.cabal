@@ -175,12 +175,12 @@ library
                        
   -- other-modules:       
   other-extensions:    CPP, BangPatterns, ForeignFunctionInterface, DeriveDataTypeable, Unsafe
-  build-depends:       base  <4.9
+  build-depends:       base  <5.0
                      , deepseq 
                      , bytestring
                      , mtl >=2.1 && <2.3
                      , mmorph >=1.0 && <1.2
-                     , transformers >=0.3 && <0.5
+                     , transformers >=0.3 && <0.5.2
                      , transformers-base
                      , streaming >=  0.1.4.0 && < 0.1.4.5
                      , resourcet

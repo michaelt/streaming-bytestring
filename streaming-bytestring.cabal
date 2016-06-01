@@ -1,5 +1,5 @@
 name:                streaming-bytestring
-version:             0.1.4.3
+version:             0.1.4.4
 synopsis:            effectful byte steams, or: bytestring io done right.
 
 description:         This is an implementation of effectful, memory-constrained 
@@ -8,7 +8,9 @@ description:         This is an implementation of effectful, memory-constrained
                      .
                      The implementation follows the
                      details of @Data.ByteString.Lazy@ and @Data.ByteString.Lazy.Char8@
-                     in unrelenting detail, replacing the lazy bytestring type:
+                     in unrelenting detail, omitting only transparently non-streaming
+                     operations like @reverse@. It is just a question of replacing 
+                     the lazy bytestring type:
                      .
                      > data ByteString     = Empty   | Chunk Strict.ByteString ByteString
                      .

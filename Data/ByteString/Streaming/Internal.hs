@@ -14,6 +14,8 @@ module Data.ByteString.Streaming.Internal (
 
    , foldrChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
    , foldlChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
+   , chunkFold
+   , chunkFoldM
    , unfoldMChunks
    , unfoldrChunks
    
@@ -347,6 +349,8 @@ foldlChunks f z = go z
         go a (Go m)       = m >>= go a
 {-# INLINABLE foldlChunks #-}
 
+
+
 foldlChunksM :: Monad m => (a -> S.ByteString -> m a) -> m a -> ByteString m r -> m (Of a r)
 foldlChunksM f z bs = z >>= \a -> go a bs
   where 
@@ -355,6 +359,24 @@ foldlChunksM f z bs = z >>= \a -> go a bs
       Chunk c cs -> f a c >>= \aa -> go aa cs
       Go m       -> m >>= go a 
 {-# INLINABLE foldlChunksM #-}
+
+chunkFold :: Monad m => (x -> S.ByteString -> x) -> x -> (x -> a) -> ByteString m r -> m (Of a r)
+chunkFold step begin done = go begin
+  where go !a !_ | a `seq` False = undefined
+        go a (Empty r)    = return (done a :> r)
+        go a (Chunk c cs) = go (step a c) cs
+        go a (Go m)       = m >>= go a
+{-# INLINABLE chunkFold  #-}
+
+
+chunkFoldM :: Monad m => (x -> S.ByteString -> m x) -> m x -> (x -> m a) -> ByteString m r -> m (Of a r)
+chunkFoldM step begin done bs = begin >>= go bs
+  where 
+    go str !x = case str of 
+      Empty r    -> done x >>= \a -> return (a :> r)
+      Chunk c cs -> step x c >>= go cs
+      Go m       -> m >>= \str' -> go str' x
+{-# INLINABLE chunkFoldM  #-}
 
 -- | Consume the chunks of an effectful ByteString with a natural right monadic fold.
 foldrChunksM :: Monad m => (S.ByteString -> m a -> m a) -> m a -> ByteString m r -> m a

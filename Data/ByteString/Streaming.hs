@@ -135,6 +135,8 @@ module Data.ByteString.Streaming (
     , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold_            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
+    , chunkFold
+    , chunkFoldM
     , head
     , head_
     , last

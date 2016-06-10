@@ -103,6 +103,8 @@ module Data.ByteString.Streaming.Char8 (
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold_            -- fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
+    , chunkFold
+    , chunkFoldM
     , length
     , length_
     , count
@@ -174,7 +176,8 @@ import Data.ByteString.Streaming
     appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
     getContents, hGetNonBlocking,
-    hGetNonBlockingN, readFile, writeFile, interact)
+    hGetNonBlockingN, readFile, writeFile, interact,
+    chunkFold, chunkFoldM)
  --   hPutNonBlocking, 
 
 import Control.Monad            (liftM)

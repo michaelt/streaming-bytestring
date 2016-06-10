@@ -130,7 +130,8 @@ module Data.ByteString.Streaming (
     -- ** Unfolding ByteStrings
     , unfoldM          -- unfoldr :: (a -> m (Maybe (Word8, a))) -> m a -> ByteString m () 
     , unfoldr          -- unfold  :: (a -> Either r (Word8, a)) -> a -> ByteString m r
-
+    , reread
+    
     -- *  Folds, including support for `Control.Foldl`
     , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 

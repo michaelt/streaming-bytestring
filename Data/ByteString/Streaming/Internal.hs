@@ -419,7 +419,18 @@ unfoldrChunks step = loop where
 {-# INLINABLE unfoldrChunks #-}
 
 
+{-| Stream chunks from something that contains @IO (Maybe ByteString)@
+    until it returns @Nothing@. @reread@ is of particular use rendering @io-streams@
+    input streams as byte streams in the present sense
 
+> Q.reread Streams.read             :: InputStream S.ByteString -> Q.ByteString IO ()
+> Q.reread (liftIO . Streams.read)  :: MonadIO m => InputStream S.ByteString -> Q.ByteString m ()
+
+The other direction here is 
+
+> Streams.unfoldM Q.unconsChunk     :: Q.ByteString IO r -> IO (InputStream S.ByteString)
+
+  -}
 reread :: Monad m => (s -> m (Maybe S.ByteString)) -> s -> ByteString m ()
 reread step s = loop where 
   loop = Go $ do 

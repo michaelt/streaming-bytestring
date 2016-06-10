@@ -98,7 +98,7 @@ module Data.ByteString.Streaming.Char8 (
     -- ** Unfolding ByteStrings
     , unfoldr          -- unfoldr :: (a -> Maybe (Char, a)) -> a -> ByteString m () 
     , unfoldM          -- unfold  :: (a -> Either r (Char, a)) -> a -> ByteString m r
-
+    , reread
     -- *  Folds, including support for `Control.Foldl`
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 

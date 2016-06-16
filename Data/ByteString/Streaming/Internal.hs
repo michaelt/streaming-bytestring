@@ -356,7 +356,7 @@ chunkMap f bs = dematerialize bs return (\bs bss -> Chunk (f bs) bss) Go
 {-#INLINE chunkMap #-}
 
 chunkMapM :: Monad m => (S.ByteString -> m S.ByteString) -> ByteString m r -> ByteString m r 
-chunkMapM f bs = dematerialize bs return (\bs bss -> Go (fmap (flip Chunk bss) (f bs))) Go
+chunkMapM f bs = dematerialize bs return (\bs bss -> Go (liftM (flip Chunk bss) (f bs))) Go
 {-#INLINE chunkMapM #-}
 
 chunkMapM_ :: Monad m => (S.ByteString -> m x) -> ByteString m r -> m r 

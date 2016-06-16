@@ -84,14 +84,6 @@ module Data.ByteString.Streaming (
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r)) 
     , nextByte -- nextByte :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
     , denull
-   
-    -- * Direct chunk handling 
-    , unconsChunk
-    , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
-    , consChunk
-    , chunk
-    , foldrChunks
-    , foldlChunks
     
     -- * Substrings
 
@@ -136,8 +128,7 @@ module Data.ByteString.Streaming (
     , foldr            -- foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold_            -- fold' :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
-    , chunkFold
-    , chunkFoldM
+    
     , head
     , head_
     , last
@@ -176,6 +167,17 @@ module Data.ByteString.Streaming (
     -- * Etc.
     , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
 
+    -- * Simple chunkwise operations 
+    , unconsChunk
+    , nextChunk    
+    , chunk
+    , foldrChunks
+    , foldlChunks
+    , chunkFold
+    , chunkFoldM
+    , chunkMap
+    , chunkMapM
+    , chunkMapM_
   ) where
 
 import Prelude hiding

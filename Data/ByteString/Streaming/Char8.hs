@@ -30,7 +30,6 @@ module Data.ByteString.Streaming.Char8 (
     , mwrap
 
 
-
     -- * Transforming ByteStrings
     , map              -- map :: Monad m => (Char -> Char) -> ByteString m r -> ByteString m r 
     , intercalate      -- intercalate :: Monad m => ByteString m () -> Stream (ByteString m) m r -> ByteString m r 
@@ -51,14 +50,6 @@ module Data.ByteString.Streaming.Char8 (
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r)) 
     , nextChar 
     
-    -- * Direct chunk handling
-    , unconsChunk
-    , nextChunk        -- nextChunk :: Monad m => ByteString m r -> m (Either r (ByteString, ByteString m r)) 
-    , consChunk
-    , chunk
-    , foldrChunks
-    , foldlChunks
-    
     -- * Substrings
 
     -- ** Breaking strings
@@ -77,8 +68,8 @@ module Data.ByteString.Streaming.Char8 (
     , lines
     , words
     , denull
+    
     -- ** Special folds
-
     , concat          -- concat :: Monad m => Stream (ByteString m) m r -> ByteString m r 
 
     -- * Builders
@@ -103,8 +94,6 @@ module Data.ByteString.Streaming.Char8 (
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 
     , fold_            -- fold' :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m r -> m (b, r) 
-    , chunkFold
-    , chunkFoldM
     , length
     , length_
     , count
@@ -137,6 +126,19 @@ module Data.ByteString.Streaming.Char8 (
     , hGetNonBlockingN -- hGetNonBlockingN :: Int -> Handle -> Int -> ByteString IO () 
     , hPut             -- hPut :: Handle -> ByteString IO r -> IO r 
 --    , hPutNonBlocking  -- hPutNonBlocking :: Handle -> ByteString IO r -> ByteString IO r 
+
+    -- * Simple chunkwise operations 
+    , unconsChunk
+    , nextChunk    
+    , chunk
+    , foldrChunks
+    , foldlChunks
+    , chunkFold
+    , chunkFoldM
+    , chunkMap
+    , chunkMapM
+    , chunkMapM_
+    
     -- * Etc.
 --    , zipWithStream    -- zipWithStream :: Monad m => (forall x. a -> ByteString m x -> ByteString m x) -> [a] -> Stream (ByteString m) m r -> Stream (ByteString m) m r 
     , distribute      -- distribute :: ByteString (t m) a -> t (ByteString m) a 
@@ -177,7 +179,7 @@ import Data.ByteString.Streaming
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 
     getContents, hGetNonBlocking,
     hGetNonBlockingN, readFile, writeFile, interact,
-    chunkFold, chunkFoldM)
+    chunkFold, chunkFoldM, chunkMap, chunkMapM)
  --   hPutNonBlocking, 
 
 import Control.Monad            (liftM)

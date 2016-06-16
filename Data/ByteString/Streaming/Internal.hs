@@ -16,6 +16,9 @@ module Data.ByteString.Streaming.Internal (
    , foldlChunksM       -- :: Monad m => (ByteString -> m a -> m a) -> m a -> ByteString m r -> m a
    , chunkFold
    , chunkFoldM
+   , chunkMap
+   , chunkMapM
+   , chunkMapM_
    , unfoldMChunks
    , unfoldrChunks
    
@@ -123,9 +126,9 @@ instance MonadTrans ByteString where
 
 instance MFunctor ByteString where
   hoist phi bs = case bs of
-    Empty r       -> Empty r
+    Empty r        -> Empty r
     Chunk bs' rest -> Chunk bs' (hoist phi rest)
-    Go m          -> Go (phi (liftM (hoist phi) m))
+    Go m           -> Go (phi (liftM (hoist phi) m))
   {-#INLINABLE hoist #-}
   
 instance (r ~ ()) => IsString (ByteString m r) where
@@ -133,10 +136,10 @@ instance (r ~ ()) => IsString (ByteString m r) where
   {-#INLINE fromString #-}
   
 instance (m ~ Identity, Show r) => Show (ByteString m r) where
-  show bs0 = case bs0 of
-    Empty r -> "Empty (" ++ show r ++ ")"
+  show bs0 = case bs0 of  -- the implementation this instance deserves ...
+    Empty r           -> "Empty (" ++ show r ++ ")"
     Go (Identity bs') -> "Go (Identity (" ++ show bs' ++ "))"
-    Chunk bs'' bs -> "Chunk " ++ show bs'' ++ " (" ++ show bs ++ ")"
+    Chunk bs'' bs     -> "Chunk " ++ show bs'' ++ " (" ++ show bs ++ ")"
     
 instance (Monoid r, Monad m) => Monoid (ByteString m r) where
   mempty = Empty mempty
@@ -151,7 +154,6 @@ instance (MonadBase b m) => MonadBase b (ByteString m) where
 instance (MonadThrow m) => MonadThrow (ByteString m) where
   throwM = lift . throwM 
   {-#INLINE throwM #-}
-
 
 instance (MonadCatch m) => MonadCatch (ByteString m) where
   catch str f = go str
@@ -349,7 +351,45 @@ foldlChunks f z = go z
         go a (Go m)       = m >>= go a
 {-# INLINABLE foldlChunks #-}
 
+chunkMap :: Monad m => (S.ByteString -> S.ByteString) -> ByteString m r -> ByteString m r 
+chunkMap f bs = dematerialize bs return (\bs bss -> Chunk (f bs) bss) Go
+{-#INLINE chunkMap #-}
 
+chunkMapM :: Monad m => (S.ByteString -> m S.ByteString) -> ByteString m r -> ByteString m r 
+chunkMapM f bs = dematerialize bs return (\bs bss -> Go (fmap (flip Chunk bss) (f bs))) Go
+{-#INLINE chunkMapM #-}
+
+chunkMapM_ :: Monad m => (S.ByteString -> m x) -> ByteString m r -> m r 
+chunkMapM_ f bs = dematerialize bs return (\bs mr -> f bs >> mr) join
+{-#INLINE chunkMapM_ #-}
+
+
+{- | @chunkFold@ is preferable to @foldlChunks@ since it is 
+     an appropriate argument for @Control.Foldl.purely@ which 
+     permits many folds and sinks to be run simulaneously on one bytestream.
+
+  -}
+chunkFold :: Monad m => (x -> S.ByteString -> x) -> x -> (x -> a) -> ByteString m r -> m (Of a r)
+chunkFold step begin done = go begin
+  where go a _ | a `seq` False = undefined
+        go a (Empty r)    = return (done a :> r)
+        go a (Chunk c cs) = go (step a c) cs
+        go a (Go m)       = m >>= go a
+{-# INLINABLE chunkFold #-}
+
+{- | @chunkFoldM@ is preferable to @foldlChunksM@ since it is 
+     an appropriate argument for @Control.Foldl.impurely@ which
+     permits many folds and sinks to be run simulaneously on one bytestream.
+
+  -}
+chunkFoldM :: Monad m => (x -> S.ByteString -> m x) -> m x -> (x -> m a) -> ByteString m r -> m (Of a r)
+chunkFoldM step begin done bs = begin >>= go bs
+  where 
+    go str !x = case str of 
+      Empty r    -> done x >>= \a -> return (a :> r)
+      Chunk c cs -> step x c >>= go cs
+      Go m       -> m >>= \str' -> go str' x
+{-# INLINABLE chunkFoldM  #-}
 
 foldlChunksM :: Monad m => (a -> S.ByteString -> m a) -> m a -> ByteString m r -> m (Of a r)
 foldlChunksM f z bs = z >>= \a -> go a bs
@@ -360,23 +400,7 @@ foldlChunksM f z bs = z >>= \a -> go a bs
       Go m       -> m >>= go a 
 {-# INLINABLE foldlChunksM #-}
 
-chunkFold :: Monad m => (x -> S.ByteString -> x) -> x -> (x -> a) -> ByteString m r -> m (Of a r)
-chunkFold step begin done = go begin
-  where go !a !_ | a `seq` False = undefined
-        go a (Empty r)    = return (done a :> r)
-        go a (Chunk c cs) = go (step a c) cs
-        go a (Go m)       = m >>= go a
-{-# INLINABLE chunkFold  #-}
 
-
-chunkFoldM :: Monad m => (x -> S.ByteString -> m x) -> m x -> (x -> m a) -> ByteString m r -> m (Of a r)
-chunkFoldM step begin done bs = begin >>= go bs
-  where 
-    go str !x = case str of 
-      Empty r    -> done x >>= \a -> return (a :> r)
-      Chunk c cs -> step x c >>= go cs
-      Go m       -> m >>= \str' -> go str' x
-{-# INLINABLE chunkFoldM  #-}
 
 -- | Consume the chunks of an effectful ByteString with a natural right monadic fold.
 foldrChunksM :: Monad m => (S.ByteString -> m a -> m a) -> m a -> ByteString m r -> m a

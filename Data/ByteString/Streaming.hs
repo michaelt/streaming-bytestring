@@ -538,14 +538,14 @@ snoc cs w = do    -- cs <* singleton w
   return r
 {-# INLINE snoc #-}
 
--- | /O(1)/ Extract the first element of a ByteString, which must be non-empty.
+-- | /O(1)/ Extract the first element of a 'ByteString', which must be non-empty.
 head_ :: Monad m => ByteString m r -> m Word8
 head_ (Empty _)   = error "head"
 head_ (Chunk c _) = return $ S.unsafeHead c
 head_ (Go m)      = m >>= head_
 {-# INLINE head_ #-}
 
--- | /O(c)/ Extract the first element of a ByteString, which must be non-empty.
+-- | /O(c)/ Extract the first element of a 'ByteString', which must be non-empty.
 head :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
 head (Empty r)  = return (Nothing :> r)
 head (Chunk c rest) = case S.uncons c of 
@@ -556,7 +556,7 @@ head (Chunk c rest) = case S.uncons c of
 head (Go m)      = m >>= head
 {-# INLINE head #-}
 
--- | /O(1)/ Extract the head and tail of a ByteString, or Nothing
+-- | /O(1)/ Extract the head and tail of a 'ByteString', or 'Nothing'
 -- if it is empty
 uncons :: Monad m => ByteString m r -> m (Maybe (Word8, ByteString m r))
 uncons (Empty _) = return Nothing
@@ -568,7 +568,7 @@ uncons (Chunk c cs)
 uncons (Go m) = m >>= uncons
 {-# INLINABLE uncons #-}
 --
--- | /O(1)/ Extract the head and tail of a ByteString, or its return value
+-- | /O(1)/ Extract the head and tail of a 'ByteString', or its return value
 -- if it is empty. This is the \'natural\' uncons for an effectful byte stream.
 nextByte :: Monad m => ByteString m r -> m (Either r (Word8, ByteString m r))
 nextByte (Empty r) = return (Left r)
@@ -598,7 +598,7 @@ nextChunk = \bs -> case bs of
   Go m       -> m >>= nextChunk
 {-# INLINABLE nextChunk #-}
 
--- | /O(n\/c)/ Extract the last element of a ByteString, which must be finite
+-- | /O(n\/c)/ Extract the last element of a 'ByteString', which must be finite
 -- and non-empty.
 last_ :: Monad m => ByteString m r -> m Word8
 last_ (Empty _)      = error "Data.ByteString.Streaming.last: empty string"
@@ -695,12 +695,12 @@ intersperse w (Chunk c cs) = Chunk (S.intersperse w c)
           
 {-# INLINABLE intersperse #-}
 
-{- | 'foldr', applied to a binary operator, a starting value
+-- | 'foldr', applied to a binary operator, a starting value
 -- (typically the right-identity of the operator), and a ByteString,
 -- reduces the ByteString using the binary operator, from right to left.
-
-> foldr cons = id
--}
+--
+-- > foldr cons = id
+--
 foldr :: Monad m => (Word8 -> a -> a) -> a -> ByteString m () -> m a
 foldr k  = foldrChunks (flip (S.foldr k))
 {-# INLINE foldr #-}
@@ -720,7 +720,7 @@ fold step0 begin done p0 = loop p0 begin
 {-# INLINABLE fold #-}
 
 
--- | 'fold\'' keeps the return value of the left-folded bytestring. Useful for
+-- | 'fold_' keeps the return value of the left-folded bytestring. Useful for
 --   simultaneous folds over a segmented bytestream
 
 fold_ :: Monad m => (x -> Word8 -> x) -> x -> (x -> b) -> ByteString m r -> m (Of b r)
@@ -912,10 +912,10 @@ cycle :: Monad m => ByteString m r -> ByteString m s
 cycle = forever
 {-# INLINE cycle #-}
 
--- | /O(n)/ The 'unfoldr' function is analogous to the Stream \'unfoldr\'.
+-- | /O(n)/ The 'unfoldr' function is analogous to the Stream @unfoldr@.
 -- 'unfoldr' builds a ByteString from a seed value.  The function takes
 -- the element and returns 'Nothing' if it is done producing the
--- ByteString or returns 'Just' @(a,b)@, in which case, @a@ is a
+-- ByteString or returns @'Just' (a,b)@, in which case, @a@ is a
 -- prepending to the ByteString and @b@ is used as the next element in a
 -- recursive call.
 
@@ -930,8 +930,8 @@ unfoldM f s0 = unfoldChunk 32 s0
 {-# INLINABLE unfoldM #-}
 
 -- | 'unfold' is like 'unfoldr' but stops when the co-algebra 
--- returns 'Left'; the result is the return value of the 'ByteString m r'
--- 'unfoldr uncons = id'
+-- returns 'Left'; the result is the return value of the @ByteString m r@
+-- @unfoldr uncons = id@
 unfoldr :: (a -> Either r (Word8, a)) -> a -> ByteString m r
 unfoldr f s0 = unfoldChunk 32 s0
   where unfoldChunk n s =
@@ -1532,8 +1532,8 @@ writeFile f str = do
   return r
 {-# INLINE writeFile #-}
 
-{-| Read an entire file into a chunked 'ByteString IO ()'.
-    The Handle will be held open until EOF is encountered.
+{-| Read an entire file into a chunked @'ByteString' IO ()@.
+    The handle will be held open until EOF is encountered.
     The block governed by 'Control.Monad.Trans.Resource.runResourceT'
     will end with the closing of any handles opened.
 
@@ -1758,7 +1758,7 @@ concatBuilders p = builder $ \bstep r -> do
 {-#INLINABLE concatBuilders #-}
 
 
-{-| A simple construction of a builder from a byte stream.
+{-| A simple construction of a builder from a 'ByteString'.
 
 >>> let aaa = "10000 is a number\n" :: Q.ByteString IO ()
 >>>  hPutBuilder  IO.stdout $ toBuilder  aaa

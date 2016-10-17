@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP, BangPatterns #-}
-{-#LANGUAGE RankNTypes, OverloadedStrings #-}
+{-#LANGUAGE RankNTypes, OverloadedStrings, ScopedTypeVariables #-}
 -- This library emulates Data.ByteString.Lazy.Char8 but includes a monadic element
 -- and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
 
@@ -488,29 +488,50 @@ filter p = R.filter (p . w2c)
      This is the genuinely streaming 'lines' which only breaks chunks, and
      thus never increases the use of memory. 
 
-> lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
+     Because 'ByteString's are usually read in binary mode, with no line
+     ending conversion, this function recognizes both @\\n@ and @\\r\\n@
+     endings (regardless of the current platform).
 -}
 
-lines :: Monad m => ByteString m r -> Stream (ByteString m) m r
--- lines = loop
---   where
---   loop !x = case x of
---     Empty r      -> Return r
---     Go m         -> Effect $ liftM loop m
---     Chunk c0 cs0 -> comb [] (B.split 10 c0) cs0
-lines (Empty r) = Return r
-lines (Go m)    = Effect $ liftM lines m
-lines (Chunk c0 cs0) = comb [] (B.split 10 c0) cs0 where
-  comb !acc [] (Empty r)       = Step (revChunks acc (Return r))
-  comb acc [] (Chunk c cs)     = comb acc (B.split 10 c) cs
-  comb acc (s:[]) (Empty r)    = Step (revChunks (s:acc) (Return r))
-  comb acc (s:[]) (Chunk c cs) = comb (s:acc) (B.split 10 c) cs
-  comb acc b (Go m)            = Effect (liftM (comb acc b) m)
-  comb acc (s:ss) cs           = Step (revChunks (s:acc) (comb [] ss cs))
-  revChunks cs r = L.foldl' (flip Chunk) (Empty r) cs
+lines :: forall m r . Monad m => ByteString m r -> Stream (ByteString m) m r
+lines text0 = loop1 text0
+  where
+    loop1 :: ByteString m r -> Stream (ByteString m) m r
+    loop1 text =
+      case text of
+        Empty r -> Return r
+        Go m -> Effect $ liftM loop1 m
+        Chunk c cs
+          | B.null c -> loop1 cs
+          | otherwise -> Step (loop2 text)
+    loop2 :: ByteString m r -> ByteString m (Stream (ByteString m) m r)
+    loop2 text =
+      case text of
+        Empty r -> Empty (Return r)
+        Go m -> Go $ liftM loop2 m
+        Chunk c cs ->
+          case B.elemIndex 10 c of
+            Nothing -> Chunk c (loop2 cs)
+            Just i ->
+              let prefixLength =
+                    if i >= 1 && B.unsafeIndex c (i-1) == 13 -- \r\n (dos)
+                      then i-1
+                      else i
+                  rest =
+                    if B.length c > i+1
+                      then Chunk (B.drop (i+1) c) cs
+                      else cs
+              in Chunk (B.unsafeTake prefixLength c) (Empty (loop1 rest))
 {-#INLINABLE lines #-}
 
--- | The 'unlines' function restores line breaks between layers 
+-- | The 'unlines' function restores line breaks between layers.
+--
+-- Note that this is not a perfect inverse of 'lines':
+--
+--  * @'lines' . 'unlines'@ can produce more strings than there were if some of
+--  the \"lines\" had embedded newlines.
+--
+--  * @'unlines' . 'lines'@ will replace @\\r\\n@ with @\\n@.
 unlines :: Monad m => Stream (ByteString m) m r ->  ByteString m r
 unlines = loop where
   loop str =  case str of

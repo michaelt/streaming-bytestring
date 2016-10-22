@@ -93,8 +93,12 @@ instance Monad m => Functor (ByteString m) where
 
 instance Monad m => Applicative (ByteString m) where
   pure = Empty
-  (<*>) = ap
-
+  {-#INLINE pure #-} 
+  bf <*> bx = do {f <- bf; x <- bx; Empty (f x)}
+  {-#INLINE (<*>) #-} 
+  (*>) = (>>)
+  {-#INLINE (*>) #-}
+  
 instance Monad m => Monad (ByteString m) where
   return = Empty
   {-#INLINE return #-}

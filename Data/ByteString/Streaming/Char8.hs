@@ -55,6 +55,7 @@ module Data.ByteString.Streaming.Char8 (
     -- ** Breaking strings
     , break            -- break :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
+    , dropWhile
     , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
     , groupBy
     , span             -- span :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
@@ -356,12 +357,14 @@ fold step begin done p0 = loop p0 begin
 
 iterate :: (Char -> Char) -> Char -> ByteString m r
 iterate f c = R.iterate (c2w . f . w2c) (c2w c)
+{-#INLINE iterate #-}
 
 -- | @'repeat' x@ is an infinite ByteString, with @x@ the value of every
 -- element.
 --
 repeat :: Char -> ByteString m r
 repeat = R.repeat . c2w
+{-#INLINE repeat #-}
 
 -- -- | /O(n)/ @'replicate' n x@ is a ByteString of length @n@ with @x@
 -- -- the value of every element.
@@ -393,10 +396,12 @@ unfoldM f = R.unfoldM go where
   go a = case f a of
     Nothing    -> Nothing
     Just (c,a) -> Just (c2w c, a)
-
+{-#INLINE unfoldM #-}
+    
 
 unfoldr :: (a -> Either r (Char, a)) -> a -> ByteString m r
 unfoldr step = R.unfoldr (either Left (\(c,a) -> Right (c2w c,a)) . step) 
+{-#INLINE unfoldr #-}
 
 
 -- ---------------------------------------------------------------------
@@ -407,25 +412,27 @@ unfoldr step = R.unfoldr (either Left (\(c,a) -> Right (c2w c,a)) . step)
 -- satisfy @p@.
 takeWhile :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m ()
 takeWhile f  = R.takeWhile (f . w2c)
--- -- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
--- dropWhile :: (Word8 -> Bool) -> ByteString -> ByteString
--- dropWhile f cs0 = dropWhile' cs0
---   where dropWhile' Empty        = Empty
---         dropWhile' (Chunk c cs) =
---           case findIndexOrEnd (not . f) c of
---             n | n < B.length c -> Chunk (B.drop n c) cs
---               | otherwise      -> dropWhile' cs
+{-#INLINE takeWhile #-}
+
+-- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
+
+dropWhile :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m r
+dropWhile f = R.dropWhile (f . w2c)
+{-#INLINE dropWhile #-}
 
 {- | 'break' @p@ is equivalent to @'span' ('not' . p)@.
 
 -}
 break :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r)
 break f = R.break (f . w2c)
+{-#INLINE break #-}
+
 --
 -- | 'span' @p xs@ breaks the ByteString into two segments. It is
 -- equivalent to @('takeWhile' p xs, 'dropWhile' p xs)@
 span :: Monad m => (Char -> Bool) -> ByteString m r -> ByteString m (ByteString m r)
 span p = break (not . p)
+{-#INLINE span #-}
 
 -- -- | /O(n)/ Splits a 'ByteString' into components delimited by
 -- -- separators, where the predicate returns True for a separator element.

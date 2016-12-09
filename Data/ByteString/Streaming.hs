@@ -90,6 +90,7 @@ module Data.ByteString.Streaming (
     -- ** Breaking strings
     , break            -- break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
     , drop             -- drop :: Monad m => GHC.Int.Int64 -> ByteString m r -> ByteString m r 
+    , dropWhile 
     , group            -- group :: Monad m => ByteString m r -> Stream (ByteString m) m r 
     , groupBy
     , span             -- span :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r) 
@@ -1032,15 +1033,18 @@ takeWhile f cs0 = takeWhile' cs0
           | otherwise      -> Chunk c (takeWhile' cs)
 {-# INLINABLE takeWhile #-}
 
--- -- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
--- dropWhile :: (Word8 -> Bool) -> ByteString -> ByteString
--- dropWhile f cs0 = dropWhile' cs0
---   where dropWhile' Empty        = Empty
---         dropWhile' (Chunk c cs) =
---           case findIndexOrEnd (not . f) c of
---             n | n < S.length c -> Chunk (S.drop n c) cs
---               | otherwise      -> dropWhile' cs
-
+-- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
+dropWhile :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m r
+dropWhile pred cs0 = drop' cs0
+  where drop' (Empty r)        = Empty r
+        drop' (Chunk c cs) =
+          case findIndexOrEnd (not.pred) c of
+            0                  -> drop' cs
+            n | n < S.length c -> Chunk (S.drop n c) cs
+              | otherwise      -> Chunk c (drop' cs)
+        drop' (Go m) = Go (liftM drop' m)
+{-#INLINABLE dropWhile #-}
+  
 -- | 'break' @p@ is equivalent to @'span' ('not' . p)@.
 break :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m (ByteString m r)
 break f cs0 = break' cs0

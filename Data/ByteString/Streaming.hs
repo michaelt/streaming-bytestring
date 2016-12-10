@@ -1036,7 +1036,7 @@ takeWhile f cs0 = takeWhile' cs0
 -- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@.
 dropWhile :: Monad m => (Word8 -> Bool) -> ByteString m r -> ByteString m r
 dropWhile pred = drop' where 
-  drop' = \bs -> case bs of 
+  drop' bs = case bs of 
     Empty r    -> Empty r
     Go m       -> Go (liftM drop' m) 
     Chunk c cs -> case findIndexOrEnd (not.pred) c of

@@ -1428,7 +1428,7 @@ hGetContentsN k h = loop -- TODO close on exceptions
         c <- liftIO (S.hGetSome h k)
         -- only blocks if there is no data available
         if S.null c
-          then Go $ liftIO (hClose h) >> return (Empty ())
+          then Empty ()
           else Chunk c loop
 {-#INLINABLE hGetContentsN #-} -- very effective inline pragma
 

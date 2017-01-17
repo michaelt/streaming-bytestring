@@ -4,9 +4,16 @@ synopsis:            effectful byte steams, or: bytestring io done right.
 
 description:         This is an implementation of effectful, memory-constrained 
                      bytestrings (byte streams) and functions for streaming 
-                     bytestring manipulation, adequate for non-lazy-io. 
+                     bytestring manipulation, adequate for non-lazy-io.  
+                     Some examples of the use of byte streams to implement simple 
+                     shell progams can be found 
+                     <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here>.
+                     Usage is as close as possible to that of @ByteString@ 
+                     and lazy @ByteString@.
+                     A @ByteString IO ()@ is the most natural representation of
+                     an effectful stream of bytes arising chunkwise from a handle.
                      .
-                     The implementation follows the
+                     Indeed, the implementation follows the
                      details of @Data.ByteString.Lazy@ and @Data.ByteString.Lazy.Char8@
                      in unrelenting detail, omitting only transparently non-streaming
                      operations like @reverse@. It is just a question of replacing 
@@ -24,7 +31,11 @@ description:         This is an implementation of effectful, memory-constrained
                      by a sort of list of strict bytestring chunks, a streaming bytestring is 
                      simply implemented as a /producer/ or /generator/ of strict bytestring chunks.
                      Most operations are defined by simply adding a line to what we find in
-                     @Data.ByteString.Lazy@.
+                     @Data.ByteString.Lazy@. The only possible simplification would 
+                     involve specializing to @IO@, throughout - but this would e.g. block
+                     the use of @ResourceT@ to manage handles and the like, and a number
+                     of other convenient operations like @copy@, which permits one to 
+                     apply two operations simultaneously over the length of the byte stream.
                      .
                      Something like this alteration of type is of course obvious and mechanical, once the idea of
                      an effectful bytestring type is contemplated and lazy io is rejected.
@@ -42,7 +53,7 @@ description:         This is an implementation of effectful, memory-constrained
                      'hGetContents' and the like follows @Data.ByteString.Lazy@; operations
                      like @lines@ and @append@ and so on are tailored not to increase chunk size. 
                      .
-                     The present library is thus nothing but /lazy bytestring done right/. 
+                     The present library is thus if you like nothing but /lazy bytestring done right/. 
                      The authors of @Data.ByteString.Lazy@ must have supposed that 
                      the directly monadic formulation of such their type 
                      would necessarily make things slower. This appears to be a prejudice. 
@@ -82,7 +93,7 @@ description:         This is an implementation of effectful, memory-constrained
                      >  time ./benchlines pipes >> /dev/null
                      >  real	0m6.353s
                      .
-                     The difference, however, is emphatically not intrinsic to pipes; 
+                     The difference, however, /is emphatically not intrinsic to pipes/; 
                      it is just that 
                      this library depends the @streaming@ library, which is used in place 
                      of @free@ to express the 

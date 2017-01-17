@@ -1,5 +1,5 @@
 name:                streaming-bytestring
-version:             0.1.4.5
+version:             0.1.4.6
 synopsis:            effectful byte steams, or: bytestring io done right.
 
 description:         This is an implementation of effectful, memory-constrained 
@@ -184,7 +184,7 @@ library
                      , mmorph >=1.0 && <1.2
                      , transformers >=0.3 && <0.6
                      , transformers-base
-                     , streaming >=  0.1.4.0 && < 0.1.4.5
+                     , streaming >=  0.1.4.0 && < 0.1.4.8
                      , resourcet
                      , exceptions
   if impl(ghc < 7.8) 

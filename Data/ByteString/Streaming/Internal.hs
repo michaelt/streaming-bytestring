@@ -222,7 +222,7 @@ mwrap = Go
 materialize :: (forall x . (r -> x) -> (S.ByteString -> x -> x) -> (m x -> x) -> x)
             -> ByteString m r
 materialize phi = phi Empty Chunk Go
-{-#INLINE materialize #-}
+{-#INLINE[0] materialize #-}
 
 -- | Resolve a succession of chunks into its Church encoding; this is
 -- not a safe operation; it is equivalent to exposing the constructors
@@ -235,7 +235,11 @@ dematerialize x0 nil cons mwrap = loop SPEC x0
      Empty r    -> nil r
      Chunk b bs -> cons b (loop SPEC bs )
      Go ms -> mwrap (liftM (loop SPEC) ms)
-{-# INLINABLE dematerialize #-}
+{-# INLINE [1] dematerialize #-}
+
+{-# RULES
+  "dematerialize/materialize" forall (phi :: forall b . (r -> b) -> (S.ByteString -> b -> b) -> (m b -> b)  -> b). dematerialize (materialize phi) = phi ;
+  #-}
 ------------------------------------------------------------------------
 
 -- The representation uses lists of packed chunks. When we have to convert from

@@ -1,7 +1,11 @@
 {-# LANGUAGE CPP, BangPatterns #-}
 {-#LANGUAGE RankNTypes, OverloadedStrings, ScopedTypeVariables #-}
--- This library emulates Data.ByteString.Lazy.Char8 but includes a monadic element
--- and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
+-- | This library emulates "Data.ByteString.Lazy.Char8" but includes a monadic element
+--   and thus at certain points uses a `Stream`/`FreeT` type in place of lists.
+--   See the documentation for @Data.ByteString.Streaming@ and the examples of
+--   of use to implement simple shell operations <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here>. Examples of use 
+--   with @http-client@, @attoparsec@, @aeson@, @zlib@ etc. can be found in the
+--   'streaming-utils' library.
 
 
 module Data.ByteString.Streaming.Char8 (

@@ -8,11 +8,14 @@ description:         This is an implementation of effectful, memory-constrained
                      Some examples of the use of byte streams to implement simple 
                      shell progams can be found 
                      <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here>.
-                     Usage is as close as possible to that of @ByteString@ 
-                     and lazy @ByteString@.
+                     See also the illustrations of use with e.g. @attoparsec@,
+                     @aeson@, @http-client@, @zlib@ etc. in the 
+                     <https://hackage.haskell.org/package/streaming-utils streaming-utils> 
+                     library.  Usage is as close as possible to that of @ByteString@ 
+                     and lazy @ByteString@. 
+                     .
                      A @ByteString IO ()@ is the most natural representation of
                      an effectful stream of bytes arising chunkwise from a handle.
-                     .
                      Indeed, the implementation follows the
                      details of @Data.ByteString.Lazy@ and @Data.ByteString.Lazy.Char8@
                      in unrelenting detail, omitting only transparently non-streaming

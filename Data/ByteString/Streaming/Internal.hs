@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP, BangPatterns, RankNTypes, GADTs #-}
 {-# LANGUAGE UnliftedFFITypes, MagicHash, UnboxedTuples #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-} 
--- for resourcet etc.
+
 module Data.ByteString.Streaming.Internal (
    ByteString (..) 
    , consChunk             -- :: S.ByteString -> ByteString m r -> ByteString m r
@@ -73,6 +73,7 @@ import GHC.IO                   (IO(IO))
 import Control.Monad.Base
 import Control.Monad.Trans.Resource
 import Control.Monad.Catch (MonadCatch (..))
+
 -- | A space-efficient representation of a succession of 'Word8' vectors, supporting many
 -- efficient operations.
 --

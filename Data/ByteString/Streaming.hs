@@ -14,11 +14,15 @@
 -- Stability   : experimental
 -- Portability : portable
 --
+-- See the simple examples of use <https://gist.github.com/michaelt/6c6843e6dd8030e95d58 here> 
+-- and the @ghci@ examples especially in "Data.ByteString.Streaming.Char8".
+-- We begin with a slight modification of the documentation to "Data.ByteString.Lazy":
+--
 -- A time and space-efficient implementation of effectful byte streams
 -- using a stream of packed 'Word8' arrays, suitable for high performance
 -- use, both in terms of large data quantities, or high speed
 -- requirements. Streaming ByteStrings are encoded as streams of strict chunks
--- of bytes.
+-- of bytes. 
 --
 -- A key feature of streaming ByteStrings is the means to manipulate large or
 -- unbounded streams of data without requiring the entire sequence to be

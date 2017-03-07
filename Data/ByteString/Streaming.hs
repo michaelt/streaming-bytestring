@@ -429,7 +429,7 @@ denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r
 denull = hoist (run . maps effects) . separate . mapped nulls
 {-#INLINE denull #-}
 
-{- | /O(1)/ Test whether a ByteString is empty, collecting its return value;
+{- | Test whether a ByteString is empty, collecting its return value;
 -- to reach the return value, this operation must check the whole length of the string.
 
 >>> Q.null "one\ntwo\three\nfour\nfive\n"
@@ -546,9 +546,11 @@ snoc cs w = do    -- cs <* singleton w
 -- | /O(1)/ Extract the first element of a 'ByteString', which must be non-empty.
 head_ :: Monad m => ByteString m r -> m Word8
 head_ (Empty _)   = error "head"
-head_ (Chunk c _) = return $ S.unsafeHead c
+head_ (Chunk c bs) = if S.null c 
+                        then head_ bs
+                        else return $ S.unsafeHead c
 head_ (Go m)      = m >>= head_
-{-# INLINE head_ #-}
+{-# INLINABLE head_ #-}
 
 -- | /O(c)/ Extract the first element of a 'ByteString', which must be non-empty.
 head :: Monad m => ByteString m r -> m (Of (Maybe Word8) r)
@@ -559,7 +561,7 @@ head (Chunk c rest) = case S.uncons c of
     r <- SP.effects $ toChunks rest
     return $! (Just w) :> r
 head (Go m)      = m >>= head
-{-# INLINE head #-}
+{-# INLINABLE head #-}
 
 -- | /O(1)/ Extract the head and tail of a 'ByteString', or 'Nothing'
 -- if it is empty

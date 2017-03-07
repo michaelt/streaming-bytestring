@@ -141,8 +141,9 @@ module Data.ByteString.Streaming (
     , length
     , length_
     , null
-    , nulls
     , null_
+    , nulls
+    , testNull
     , count
     , count_
     -- * I\/O with 'ByteString's
@@ -403,8 +404,31 @@ toLazy bs0 = dematerialize bs0
 -- ---------------------------------------------------------------------
 -- Basic interface
 --
+
+{- | Test whether a ByteString is empty, collecting its return value;
+-- to reach the return value, this operation must check the whole length of the string.
+
+>>> Q.null "one\ntwo\three\nfour\nfive\n"
+False :> ()
+>>> Q.null ""
+True :> ()
+>>> S.print $ mapped R.null $ Q.lines "yours,\nMeredith"
+False
+False
+
+-}
+null :: Monad m => ByteString m r -> m (Of Bool r)
+null (Empty r)  = return (True :> r)
+null (Go m)     = m >>= null
+null (Chunk bs rest) = if S.null bs 
+   then null rest 
+   else do 
+     r <- SP.effects (toChunks rest)
+     return (False :> r)
+{-# INLINABLE null #-}
+
 {-| /O(1)/ Test whether an ByteString is empty. The value is of course in 
-  the monad of the effects.
+  the monad of the effects. 
 
 >>>  Q.null "one\ntwo\three\nfour\nfive\n"
 False
@@ -422,6 +446,14 @@ null_ (Chunk bs rest) = if S.null bs
 {-# INLINABLE null_ #-}
 
 
+testNull :: Monad m => ByteString m r -> m (Of Bool (ByteString m r))
+testNull (Empty r)  = return (True :> Empty r)
+testNull (Go m)     = m >>= testNull
+testNull p@(Chunk bs rest) = if S.null bs 
+   then testNull rest 
+   else return (False :> p)
+{-# INLINABLE testNull #-}
+
 {-| Remove empty ByteStrings from a stream of bytestrings.
 
 -}
@@ -429,27 +461,7 @@ denull :: Monad m => Stream (ByteString m) m r -> Stream (ByteString m) m r
 denull = hoist (run . maps effects) . separate . mapped nulls
 {-#INLINE denull #-}
 
-{- | Test whether a ByteString is empty, collecting its return value;
--- to reach the return value, this operation must check the whole length of the string.
 
->>> Q.null "one\ntwo\three\nfour\nfive\n"
-False :> ()
->>> Q.null ""
-True :> ()
->>> S.print $ mapped R.null $ Q.lines "yours,\nMeredith"
-False
-False
-
--}
-null :: Monad m => ByteString m r -> m (Of Bool r)
-null (Empty r)  = return $! True :> r
-null (Go m)     = m >>= null
-null (Chunk bs rest) = if S.null bs 
-   then null rest 
-   else do 
-     r <- SP.effects (toChunks rest)
-     return (False :> r)
-{-# INLINABLE null #-}
 
 {-| /O1/ Distinguish empty from non-empty lines, while maintaining streaming; 
     the empty ByteStrings are on the right

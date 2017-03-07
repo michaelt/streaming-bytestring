@@ -50,6 +50,8 @@ module Data.ByteString.Streaming.Char8 (
     , last             -- last :: Monad m => ByteString m r -> m Char
     , last_            -- last' :: Monad m => ByteString m r -> m (Of Char r)
     , null             -- null :: Monad m => ByteString m r -> m Bool 
+    , null_
+    , testNull
     , nulls            -- null' :: Monad m => ByteString m r -> m (Of Bool r)
     , uncons           -- uncons :: Monad m => ByteString m r -> m (Either r (Char, ByteString m r)) 
     , nextChar 
@@ -95,6 +97,7 @@ module Data.ByteString.Streaming.Char8 (
     , unfoldr          -- unfoldr :: (a -> Maybe (Char, a)) -> a -> ByteString m () 
     , unfoldM          -- unfold  :: (a -> Either r (Char, a)) -> a -> ByteString m r
     , reread
+    
     -- *  Folds, including support for `Control.Foldl`
 --    , foldr            -- foldr :: Monad m => (Char -> a -> a) -> a -> ByteString m () -> m a 
     , fold             -- fold :: Monad m => (x -> Char -> x) -> x -> (x -> b) -> ByteString m () -> m b 
@@ -103,7 +106,6 @@ module Data.ByteString.Streaming.Char8 (
     , length_
     , count
     , count_
-    , null_
     , readInt
     -- * I\/O with 'ByteString's
 
@@ -178,7 +180,7 @@ import Data.ByteString.Streaming
     fromChunks, toChunks, fromStrict, toStrict, toStrict_, 
     concat, distribute, effects, drained, mwrap, toStreamingByteStringWith,
     toStreamingByteString, toBuilder, concatBuilders,
-    empty, null, nulls, null_, length, length_, append, cycle, 
+    empty, null, nulls, null_, testNull, length, length_, append, cycle, 
     take, drop, splitAt, intercalate, group, denull,
     appendFile, stdout, stdin, fromHandle, toHandle,
     hGetContents, hGetContentsN, hGet, hGetN, hPut, 

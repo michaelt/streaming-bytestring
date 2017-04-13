@@ -516,16 +516,22 @@ lines text0 = loop1 text0
         Go m -> Effect $ liftM loop1 m
         Chunk c cs
           | B.null c -> loop1 cs
-          | otherwise -> Step (loop2 text)
-    loop2 :: ByteString m r -> ByteString m (Stream (ByteString m) m r)
-    loop2 text =
+          | otherwise -> Step (loop2 False text)
+    loop2 :: Bool -> ByteString m r -> ByteString m (Stream (ByteString m) m r)
+    loop2 prevCr text =
       case text of
-        Empty r -> Empty (Return r)
-        Go m -> Go $ liftM loop2 m
+        Empty r -> if prevCr 
+          then Chunk (B.singleton 13) (Empty (Return r)) 
+          else Empty (Return r)
+        Go m -> Go $ liftM (loop2 prevCr) m
         Chunk c cs ->
           case B.elemIndex 10 c of
-            Nothing -> Chunk c (loop2 cs)
-            Just i ->
+            Nothing -> if B.null c 
+              then loop2 prevCr cs
+              else if B.unsafeLast c == 13
+                then Chunk (B.unsafeInit c) (loop2 True cs)
+                else Chunk c (loop2 False cs)
+            Just i -> do
               let prefixLength =
                     if i >= 1 && B.unsafeIndex c (i-1) == 13 -- \r\n (dos)
                       then i-1
@@ -534,7 +540,10 @@ lines text0 = loop1 text0
                     if B.length c > i+1
                       then Chunk (B.drop (i+1) c) cs
                       else cs
-              in Chunk (B.unsafeTake prefixLength c) (Empty (loop1 rest))
+                  result = Chunk (B.unsafeTake prefixLength c) (Empty (loop1 rest))
+              if i > 0 && prevCr
+                then Chunk (B.singleton 13) result
+                else result
 {-#INLINABLE lines #-}
 
 -- | The 'unlines' function restores line breaks between layers.

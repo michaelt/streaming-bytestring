@@ -65,6 +65,7 @@ module Data.ByteString.Streaming (
     , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
+    , fromStrictResult -- fromStrictResult :: ByteString -> r -> ByteString m r
     , toStrict         -- toStrict :: Monad m => ByteString m () -> m ByteString 
     , toStrict_        -- toStrict_ :: Monad m => ByteString m r -> m (Of ByteString r) 
     , effects
@@ -311,9 +312,15 @@ toChunks bs =
 {-| /O(1)/ yield a strict 'ByteString' chunk. 
 -}
 fromStrict :: P.ByteString -> ByteString m ()
-fromStrict bs | S.null bs = Empty ()
-              | otherwise = Chunk bs  (Empty ())
+fromStrict bs = fromStrictResult bs ()
 {-# INLINE fromStrict #-}
+
+{-| /O(1) yeild a strict 'ByteString' chunk with a specified result.
+-}
+fromStrictResult :: P.ByteString -> r -> ByteString m r
+fromStrictResult bs r | S.null bs = Empty r
+                      | otherwise = Chunk bs (Empty r)
+{-# INLINE fromStrictResult #-}
 
 {-| /O(n)/ Convert a byte stream into a single strict 'ByteString'.
 

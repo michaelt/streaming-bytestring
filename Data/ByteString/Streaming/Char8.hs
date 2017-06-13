@@ -23,6 +23,7 @@ module Data.ByteString.Streaming.Char8 (
     , fromChunks       -- fromChunks :: Monad m => Stream (Of ByteString) m r -> ByteString m r 
     , fromLazy         -- fromLazy :: Monad m => ByteString -> ByteString m () 
     , fromStrict       -- fromStrict :: ByteString -> ByteString m () 
+    , fromStrictResult -- fromStrictResult :: ByteString -> r -> ByteString m r
     , toChunks         -- toChunks :: Monad m => ByteString m r -> Stream (Of ByteString) m r 
     , toLazy           -- toLazy :: Monad m => ByteString m () -> m ByteString 
     , toLazy_
@@ -177,7 +178,7 @@ import Data.ByteString.Streaming.Internal
 
 import Data.ByteString.Streaming
     (fromLazy, toLazy, toLazy_, nextChunk, unconsChunk, 
-    fromChunks, toChunks, fromStrict, toStrict, toStrict_, 
+    fromChunks, toChunks, fromStrict, fromStrictResult, toStrict, toStrict_, 
     concat, distribute, effects, drained, mwrap, toStreamingByteStringWith,
     toStreamingByteString, toBuilder, concatBuilders,
     empty, null, nulls, null_, testNull, length, length_, append, cycle, 

@@ -197,6 +197,7 @@ import qualified System.IO  as IO
 import System.IO.Unsafe
 import Control.Exception        (bracket)
 import Data.Char (isDigit)
+import Data.Word (Word8)
 import Foreign.ForeignPtr       (withForeignPtr)
 import Foreign.Ptr
 import Foreign.Storable
@@ -594,7 +595,8 @@ unwords = intercalate (singleton ' ')
      this function preserves newlines characters. 
 
      Like 'lines', this function properly handles both @\\n@ and @\\r\\n@
-     endings regardless of the current platform.
+     endings regardless of the current platform. It does not support @\\r@ or
+     @\\n\\r@ line endings.
      
      >>> let planets = ["Mercury","Venus","Earth","Mars","Saturn","Jupiter","Neptune","Uranus"]
      >>> S.mapsM_ (\x -> putStrLn "Chunk" >> Q.putStrLn x) $ Q.lineSplit 3 $ Q.string $ L.unlines planets
@@ -635,10 +637,10 @@ lineSplit !n0 text0 = loop1 0 text0
         Empty r -> Empty (Return r)
         Go m -> Go $ liftM (loop2 counter) m
         Chunk c cs ->
-          let !numNewlines = B.count 10 c
+          let !numNewlines = B.count newline c
               !newCounter = counter + numNewlines
            in if newCounter >= n
-                then case Prelude.drop (n - counter - 1) (B.findIndices (== 10) c) of
+                then case Prelude.drop (n - counter - 1) (B.findIndices (== newline) c) of
                   i : _ -> 
                     let !j = i + 1
                      in Chunk (B.unsafeTake j c) (Empty (loop1 0 (Chunk (B.unsafeDrop j c) cs)))
@@ -650,6 +652,9 @@ lineSplit !n0 text0 = loop1 0 text0
                 else Chunk c (loop2 newCounter cs)
 {-#INLINABLE lineSplit #-}
 
+newline :: Word8
+newline = 10
+{-# INLINE newline #-}
 
 string :: String -> ByteString m ()
 string = chunk . B.pack . Prelude.map B.c2w

@@ -32,6 +32,7 @@ module Data.ByteString.Streaming.Internal (
    , reread
    , inlinePerformIO
    , unsafeLast
+   , unsafeInit
    , copy
    
    -- * ResourceT help
@@ -334,12 +335,18 @@ unpackBytes bss = dematerialize bss
                                loop sentinal (p `plusPtr` (-1)) (Step (x :> acc))
 {-# INLINABLE unpackBytes #-}
 
+-- copied from Data.ByteString.Unsafe for compatibility with older bytestring
 unsafeLast :: S.ByteString -> Word8
 unsafeLast (S.PS x s l) = 
     accursedUnutterablePerformIO $ withForeignPtr x $ \p -> peekByteOff p (s+l-1)
  where
       accursedUnutterablePerformIO (IO m) = case m realWorld# of (# _, r #) -> r
 {-# INLINE unsafeLast #-}
+
+-- copied from Data.ByteString.Unsafe for compatibility with older bytestring
+unsafeInit :: S.ByteString -> S.ByteString
+unsafeInit (S.PS ps s l) = S.PS ps s (l-1)
+{-# INLINE unsafeInit #-}
 
 inlinePerformIO :: IO a -> a
 inlinePerformIO (IO m) = case m realWorld# of (# _, r #) -> r

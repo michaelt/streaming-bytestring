@@ -528,8 +528,8 @@ lines text0 = loop1 text0
           case B.elemIndex 10 c of
             Nothing -> if B.null c 
               then loop2 prevCr cs
-              else if B.unsafeLast c == 13
-                then Chunk (B.unsafeInit c) (loop2 True cs)
+              else if unsafeLast c == 13
+                then Chunk (unsafeInit c) (loop2 True cs)
                 else Chunk c (loop2 False cs)
             Just i -> do
               let prefixLength =

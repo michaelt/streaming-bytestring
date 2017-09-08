@@ -35,6 +35,10 @@ s_lines
 main = defaultMain $ testGroup "Tests"
   [ testGroup "lines" $
     [ testProperty "Data.ByteString.Streaming.Char8.lines is equivalent to Prelude.lines" $ over chunksSeries $ \chunks ->
+        -- This only makes sure that the streaming-bytestring lines function
+        -- matches the Prelude lines function when no carriage returns
+        -- are present. They are not expected to have the same behavior
+        -- with dos-style line termination.
         let expected = lines $ concat chunks
             got = (map BS8.unpack . s_lines . fromChunks) chunks
         in
@@ -43,5 +47,7 @@ main = defaultMain $ testGroup "Tests"
           else Left (printf "Expected %s; got %s" (show expected) (show got) :: String)
     , testProperty "lines recognizes DOS line endings" $ over strSeries $ \str ->
         s_lines (SBS8.string $ unix2dos str) == s_lines (SBS8.string str)
+    , testProperty "lines recognizes DOS line endings with tiny chunks" $ over strSeries $ \str ->
+        s_lines (mapM_ SBS8.singleton $ unix2dos str) == s_lines (mapM_ SBS8.singleton str)
     ]
   ]

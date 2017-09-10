@@ -614,6 +614,10 @@ unwords = intercalate (singleton ' ')
      Neptune
      Uranus
 
+     Since all characters originally present in the stream are preserved,
+     this function satisfies the following law:
+
+     > Ɐ n bs. concat (lineSplit n bs) ≅ bs
 -}
 lineSplit :: forall m r. Monad m 
   => Int -- ^ number of lines per group

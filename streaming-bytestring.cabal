@@ -198,7 +198,7 @@ library
                      , mmorph >=1.0 && <1.2
                      , transformers >=0.3 && <0.6
                      , transformers-base
-                     , streaming >=  0.1.4.0 && < 0.1.4.8
+                     , streaming >=  0.1.4.0 && < 0.3
                      , resourcet
                      , exceptions
   if impl(ghc < 7.8) 
